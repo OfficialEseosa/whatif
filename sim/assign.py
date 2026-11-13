@@ -97,16 +97,18 @@ def load_flows(net, sp: ShortestPaths, row: np.ndarray, dest: np.ndarray, amount
 
 def trace_path(net, sp: ShortestPaths, row: int, dest: int) -> list[int]:
     """Edge rows along the path origin(row) -> dest, in travel order."""
-    out = []
-    cur = dest
-    o = sp.origins[row]
-    while cur != o:
-        p = sp.pred[row, cur]
+    nodes = [int(dest)]
+    o = int(sp.origins[row])
+    pred = sp.pred[row]
+    while nodes[-1] != o:
+        p = int(pred[nodes[-1]])
         if p < 0:
             return []
-        out.append(int(sp.edge_of(np.array([p]), np.array([cur]), net.n_nodes)[0]))
-        cur = p
-    return out[::-1]
+        nodes.append(p)
+    if len(nodes) < 2:
+        return []
+    nd = np.asarray(nodes[::-1], np.int64)
+    return sp.edge_of(nd[:-1], nd[1:], net.n_nodes).tolist()
 
 
 @dataclass

@@ -19,11 +19,10 @@ contract-shaped `ScenarioResult` JSON for the Next.js frontend.
 
 Stops outside the box, or fewer than two stops, raise `edits.EditError` -> HTTP 422 with a plain message.
 
-**Not deployed yet:** the deployed service (https://whatif-sim-gold.vercel.app, `sim/deploy/`) runs an older
-commit. The new code is NOT redeployed because live runs are too slow: 37-124 s per run with 2,000 agents
-(the model part is 3-9 s; the rest is display-path export: per-agent street routing in `display.Router`
-and per-tract polygon work in `verdict.assess`). Next step: profile `export.build_result` and cache/vectorise
-(`display.Router.route` dijkstra per connector; `equity.buffer_share`), then redeploy.
+**Speed:** a live run takes 5-8 s locally with 2,000 agents (model 2-3 s). The export draws each
+agent's baseline trip once: `export.build_display_cache()` writes `data/cache/display_<tag>.pkl` (baseline
+trips for 2,000 and 3,000 agents plus their street routes), which ships with the other caches and is
+ignored if it was built from a different baseline. Rebuild it after rebuilding the baseline.
 
 **Scenario runs are warm-started** (`model.run_model(warm=...)`): the baseline object holds `seed` (the
 calibrated run) and `run` (the seed re-run through the same warm procedure with no edit), so an edit that
@@ -37,12 +36,13 @@ python -m venv .venv; .\.venv\Scripts\python.exe -m pip install -r requirements.
 #   if Overpass is down: download georgia-latest.osm.pbf (Geofabrik) into data/ and run osm_pbf.py
 .\.venv\Scripts\python.exe equity.py                           # data/cache/equity_2024.pkl
 .\.venv\Scripts\python.exe -c "import network as n, demand, transit, model; net=n.load_network(rebuild=True); n.export_major_roads(net); demand.load_demand(net, rebuild=True); transit.load_transit_base(rebuild=True); model.load_baseline(rebuild=True)"
+.\.venv\Scripts\python.exe -c "import export; export.build_display_cache()"   # data/cache/display_<tag>.pkl
 .\.venv\Scripts\python.exe run.py baseline; .\.venv\Scripts\python.exe run.py beltline   # prebaked files
 node --experimental-strip-types validate_contract.mjs ..\public\scenarios\beltline-streetcar.sim.json
 .\.venv\Scripts\python.exe check_paths.py                      # drawn paths stay on the network
 .\.venv\Scripts\python.exe prebake.py edits.json              # saved runs for [{id, edit}] (edit exactly as /api/plan returns it)
 ```
-Runtime caches needed by `/simulate`: `data/cache/{baseline,demand,network,transit_base}_<tag>.pkl`,
+Runtime caches needed by `/simulate`: `data/cache/{baseline,demand,network,transit_base,display}_<tag>.pkl`,
 `data/cache/equity_2024.pkl`, `data/corridors_<tag>.json`, plus `src/data/gazetteer.json`.
 `WHATIF_CACHE_DIR` moves the cache dir, `WHATIF_BBOX` changes the box, `WHATIF_OUT_DIR` redirects exports.
 Request-time deps: `requirements-runtime.txt` (no OSMnx/geopandas). **Code and caches are a matched pair**:

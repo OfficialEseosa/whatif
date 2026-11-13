@@ -55,6 +55,14 @@ class Sample:
 
 
 def draw_sample(dem, n=DISPLAY_SAMPLE_SIZE, seed=SEED) -> Sample:
+    cache = dem.__dict__.setdefault("_samples", {})   # deterministic per (n, seed); depart is edited by the caller
+    if (n, seed) not in cache:
+        cache[(n, seed)] = _draw_sample(dem, n, seed)
+    s = cache[(n, seed)]
+    return Sample(pair=s.pair, home=s.home, work=s.work, band=s.band, depart=s.depart.copy(), u=s.u)
+
+
+def _draw_sample(dem, n, seed) -> Sample:
     rng = np.random.default_rng(seed)
     od = dem.od
     w = od.jobs.values / od.jobs.values.sum()
@@ -109,13 +117,14 @@ class _Path:
     def _same(self, a, b):
         return abs(a[0] - b[0]) < 1e-9 and abs(a[1] - b[1]) < 1e-9
 
-    def move(self, coords, t0, t1, times=None):
-        coords = [list(map(float, x)) for x in coords]
-        if not coords:
+    def move(self, coords, t0, t1, times=None, frac=None):
+        if len(coords) == 0:
             return
-        if times is None:
-            coords = dsp.dedupe(coords)
-            times = dsp.timed(coords, t0, t1)
+        if frac is not None:                 # prepared leg (display.prep): deduped coords + length fractions
+            times = (t0 + (t1 - t0) * frac).tolist()
+        elif times is None:
+            coords, frac = dsp.prep(coords)
+            times = (t0 + (t1 - t0) * frac).tolist()
         if self.c and self._same(self.c[-1], coords[0]):
             coords, times = coords[1:], times[1:]
         if self.c:
@@ -123,6 +132,9 @@ class _Path:
         self.c += coords
         self.t += list(times)
         self.forced.add(len(self.c) - 1)
+
+    def leg(self, prepared, t0, t1):
+        self.move(prepared[0], t0, t1, frac=prepared[1])
 
     def wait(self, t):
         if self.c:
@@ -144,6 +156,13 @@ class _Path:
         return [self.c[k] for k in keep], [self.t[k] for k in keep]
 
 
+def _edge_ends(net):
+    d = net.__dict__
+    if "_edge_ends" not in d:
+        d["_edge_ends"] = (net.edges.u_idx.values, net.edges.v_idx.values)
+    return d["_edge_ends"]
+
+
 def drive_trip(net, run, pair, home, work, depart, router):
     """Internal: home -> (local streets) -> modeled route -> (local streets) -> work.
     Inbound: starts at the gateway node when the (estimated, not drawn) out-of-box leg
@@ -152,20 +171,20 @@ def drive_trip(net, run, pair, home, work, depart, router):
     edges = trace_path(net, asg.sp, int(asg.od_row[pair]), int(asg.od_dest[pair]))
     half = DRIVE_TERMINAL_MIN * 30.0
     out_s = float(asg.out_min[pair]) * 60.0 if asg.out_min is not None else 0.0
-    e = net.edges
-    start = int(e.u_idx.values[edges[0]]) if edges else int(asg.od_dest[pair])
-    end = int(e.v_idx.values[edges[-1]]) if edges else int(asg.od_dest[pair])
+    eu, ev = _edge_ends(net)
+    start = int(eu[edges[0]]) if edges else int(asg.od_dest[pair])
+    end = int(ev[edges[-1]]) if edges else int(asg.od_dest[pair])
     P = _Path()
     t = depart + half + out_s
     if out_s > 0:
         P.move([list(net.node_xy[start])], t, t)
     else:
-        P.move(router.route(home, net.node_xy[start]), depart, t)
+        P.leg(router.route_p(home, net.node_xy[start]), depart, t)
     rc, rt = [], []                       # modeled route = one leg with per-edge times
     for ei in edges:
-        g = dsp.dedupe(net.edge_geoms[ei])
+        g, fr = dsp.edge_draw(net, ei)
         et = float(asg.time_s[ei])
-        tt = dsp.timed(g, t, t + et)
+        tt = (t + et * fr).tolist()
         if rc:
             g, tt = g[1:], tt[1:]
         rc += g
@@ -173,7 +192,7 @@ def drive_trip(net, run, pair, home, work, depart, router):
         t += et
     if rc:
         P.move(rc, None, None, times=rt)
-    P.move(router.route(net.node_xy[end], work), t, t + half)
+    P.leg(router.route_p(net.node_xy[end], work), t, t + half)
     return _finish("drive", run.drive_min[pair], *P.done())
 
 
@@ -205,7 +224,7 @@ def transit_trip(dem, run, pair, home, work, depart, router):
     for a, b in zip(nodes[:-1], nodes[1:]):
         ka, kb = kind[a], kind[b]
         if ka == 0 and kb == 2:                       # home -> stop (walk)
-            P.move(router.route(home, xy(b)), depart, T(b))
+            P.leg(router.route_p(home, xy(b)), depart, T(b))
         elif kb == 4 and ka in (2, 3):                # board: wait at the stop
             P.wait(T(b))
         elif ka == 4 and kb == 4:                     # ride one hop
@@ -213,15 +232,19 @@ def transit_trip(dem, run, pair, home, work, depart, router):
             lines.append(LINE_IDS.get(p.route_name, "proposed" if p.route_id.startswith("proposed")
                                       else f"bus_{p.route_name}"))
             hp = p.hop_paths[int(tg.rs_pos[a])] if p.hop_paths else None
-            P.move(hp if hp else router.route(xy(a), xy(b)), T(a), T(b))
+            P.leg(dsp.hop_draw(hp) if hp else router.route_p(xy(a), xy(b)), T(a), T(b))
         elif ka == 4 and kb == 3:                     # alight
             pass
         elif ka == 3 and kb == 3:                     # transfer walk
-            P.move(router.route(xy(a), xy(b)), T(a), T(b))
+            P.leg(router.route_p(xy(a), xy(b)), T(a), T(b))
         elif ka == 3 and kb == 1:                     # stop -> work (walk)
-            P.move(router.route(xy(a), work), T(a), T(b))
+            P.leg(router.route_p(xy(a), work), T(a), T(b))
     if ext:  # drop the out-of-box part of the drawn path (cut at a vertex, still on the shape)
-        k = next((i for i, c in enumerate(P.c) if _in_box(c)), len(P.c) - 1)
+        w_, s_, e_, n_ = config.BBOX
+        a_ = np.asarray(P.c, float).reshape(-1, 2)
+        ins = np.flatnonzero((a_[:, 0] >= w_ - 0.002) & (a_[:, 0] <= e_ + 0.002) &
+                             (a_[:, 1] >= s_ - 0.002) & (a_[:, 1] <= n_ + 0.002))
+        k = int(ins[0]) if len(ins) else len(P.c) - 1
         P.c, P.t = P.c[k:], P.t[k:]
     mode = "park_ride" if (sk.pnr is not None and sk.pnr[pair]) else "transit"
     c, t = P.done()
@@ -319,6 +342,54 @@ def load_mock():
     return _fallback_sections(), False
 
 
+# Display cache: the baseline trips of the display sample and the street routes they use are the
+# same for every scenario, so they are drawn once (build time) and shipped with the other caches.
+DISPLAY_CACHE = config.CACHE_DIR / f"display_{config.bbox_tag()}.pkl"
+_DC: dict = {}
+
+
+def _fingerprint(base):
+    r = base.run
+    return (round(float(r.asg.time_s.sum()), 3), round(float(r.p_transit.sum()), 6), len(base.dem.od))
+
+
+def _display_cache(base, router):
+    if _DC.get("base") is not base:
+        import pickle
+
+        _DC.clear()
+        _DC.update(base=base, btrips={})
+        if DISPLAY_CACHE.exists():
+            try:
+                with open(DISPLAY_CACHE, "rb") as f:
+                    d = pickle.load(f)
+                if d.get("fp") == _fingerprint(base):   # built from this exact baseline
+                    _DC["btrips"] = d["btrips"]
+                    router.routes.update(d["routes"])
+            except Exception:  # noqa: BLE001  (a stale or unreadable cache only costs time)
+                pass
+    return _DC
+
+
+def build_display_cache(base=None, sizes=(2000, DISPLAY_SAMPLE_SIZE)):
+    """Draw the baseline trips for the live and saved sample sizes and write the display cache."""
+    import pickle
+
+    from model import load_baseline
+    from network import load_display_network
+
+    base = base or load_baseline(verbose=False)
+    if DISPLAY_CACHE.exists():
+        DISPLAY_CACHE.unlink()
+    _DC.clear()
+    for n in sizes:
+        build_result("baseline", "Baseline", {"type": "extend_line", "name": "Baseline", "stops": []}, base, n_sample=n)
+    router = dsp.router_for(load_display_network())
+    with open(DISPLAY_CACHE, "wb") as f:
+        pickle.dump({"fp": _fingerprint(base), "btrips": _DC["btrips"], "routes": router.routes}, f)
+    print(f"wrote {DISPLAY_CACHE} ({DISPLAY_CACHE.stat().st_size/1e6:.1f} MB, {len(router.routes)} routes)")
+
+
 def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=DISPLAY_SAMPLE_SIZE,
                  seed=SEED, riders_on_line: float = 0.0, change: dict | None = None) -> dict:
     net, dem, brun = base.net, base.dem, base.run
@@ -341,7 +412,8 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
 
     router = dsp.router_for(load_display_network())
     for run in {id(brun): brun, id(prun): prun}.values():
-        dsp.attach_hop_paths(run.td, router)
+        dsp.attach_hop_paths(run.td, router, verbose=False)
+    btrips = _display_cache(base, router)["btrips"].setdefault((n_sample, seed), {})
 
     agents = []
     for i in range(n_sample):
@@ -351,11 +423,13 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
         b_min = brun.transit_min[pi] if b_transit else brun.drive_min[pi]
         s.depart[i] = max(0.0, s.depart[i] - 60.0 * float(b_min))  # sampled arrival -> departure
         for run in (brun, prun):
-            tr = None
-            if s.u[i] < run.p_transit[pi]:
+            tr = btrips.get(i) if run is brun else None   # baseline trips never change: drawn once
+            if tr is None and s.u[i] < run.p_transit[pi]:
                 tr = transit_trip(dem, run, pi, s.home[i], s.work[i], s.depart[i], router)
             if tr is None:
                 tr = drive_trip(net, run, pi, s.home[i], s.work[i], s.depart[i], router)
+            if run is brun:
+                btrips[i] = tr
             trips.append(tr)
         delta = trips[1]["minutes"] - trips[0]["minutes"]
         tract_id = str(dem.od.home_tract.values[pi])  # inbound: home tract outside the box

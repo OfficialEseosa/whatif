@@ -262,8 +262,18 @@ def find_gateways(net: "Network", G) -> pd.DataFrame:
                           "cls": hw, "name": str(name)} for nd, hw, name in keep])
 
 
+_DISPLAY_NET: dict = {}
+
+
 def load_display_network(rebuild: bool = False) -> Network:
-    """Every drivable street (used for drawing walk/connector legs and path checks)."""
+    """Every drivable street (used for drawing walk/connector legs and path checks).
+    Loaded once per process so the street router built on it (and its route cache) is reused."""
+    if rebuild or "net" not in _DISPLAY_NET:
+        _DISPLAY_NET["net"] = _load_display_network(rebuild)
+    return _DISPLAY_NET["net"]
+
+
+def _load_display_network(rebuild: bool = False) -> Network:
     if not config.ASSIGN_MAJOR_ROADS_ONLY:
         return load_network(rebuild)
     if DISPLAY_CACHE.exists() and not rebuild:

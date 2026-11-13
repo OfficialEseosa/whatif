@@ -52,12 +52,13 @@ def seg_len(a, b):
 
 
 def dedupe(coords):
-    out = []
-    for c in coords:
-        c = [float(c[0]), float(c[1])]
-        if not out or abs(out[-1][0] - c[0]) > 1e-9 or abs(out[-1][1] - c[1]) > 1e-9:
-            out.append(c)
-    return out
+    if len(coords) == 0:
+        return []
+    p = np.asarray(coords, float).reshape(-1, 2)
+    if len(p) > 1:
+        d = np.abs(np.diff(p, axis=0))
+        p = p[np.r_[True, (d[:, 0] > 1e-9) | (d[:, 1] > 1e-9)]]
+    return p.tolist()
 
 
 def simplify(coords, tol_m=SIMPLIFY_TOL_M):
@@ -96,10 +97,48 @@ def timed(coords, t0, t1):
     """Distance-proportional timestamps between t0 and t1 for a leg."""
     if len(coords) == 1:
         return [t0]
-    d = np.r_[0.0, np.cumsum([seg_len(a, b) for a, b in zip(coords[:-1], coords[1:])])]
-    if d[-1] <= 0:
-        return list(np.linspace(t0, t1, len(coords)))
-    return list(t0 + (t1 - t0) * d / d[-1])
+    return (t0 + (t1 - t0) * fractions(coords)).tolist()
+
+
+def fractions(coords):
+    """Cumulative share of a polyline's length at each vertex (0..1)."""
+    p = np.asarray(coords, float)
+    d = np.r_[0.0, np.cumsum(np.hypot((p[1:, 0] - p[:-1, 0]) * LAT0, p[1:, 1] - p[:-1, 1]))]
+    return d / d[-1] if d[-1] > 0 else np.linspace(0.0, 1.0, len(p))
+
+
+def prep(coords):
+    """(deduped coords as a list, cumulative length fractions) for one drawn leg."""
+    p = np.asarray(coords, float).reshape(-1, 2)
+    if len(p) > 1:
+        d = np.abs(np.diff(p, axis=0))
+        p = p[np.r_[True, (d[:, 0] > 1e-9) | (d[:, 1] > 1e-9)]]
+    if len(p) == 1:
+        return p.tolist(), np.zeros(1)
+    d = np.r_[0.0, np.cumsum(np.hypot((p[1:, 0] - p[:-1, 0]) * LAT0, p[1:, 1] - p[:-1, 1]))]
+    return p.tolist(), (d / d[-1] if d[-1] > 0 else np.linspace(0.0, 1.0, len(p)))
+
+
+_HOPS: dict = {}
+
+
+def hop_draw(hp):
+    """prep() of a transit hop polyline, cached by object identity (hop lists are never edited)."""
+    c = _HOPS.get(id(hp))
+    if c is None or c[0] is not hp:
+        if len(_HOPS) > 20000:
+            _HOPS.clear()
+        c = _HOPS[id(hp)] = (hp,) + prep(hp)
+    return c[1], c[2]
+
+
+def edge_draw(net, i):
+    """(deduped coords, cumulative length fractions) of a network edge, cached on the network."""
+    cache = net.__dict__.setdefault("_edge_draw", {})
+    if i not in cache:
+        g = dedupe(net.edge_geoms[i])
+        cache[i] = (g, fractions(g) if len(g) > 1 else np.zeros(1))
+    return cache[i]
 
 
 class Router:
@@ -124,6 +163,9 @@ class Router:
         self.m = csr_matrix((np.maximum(w[first], 1e-3), (r[first], c[first])), shape=(net.n_nodes, net.n_nodes))
         self.tree = cKDTree(to_xy(net.node_xy))
         self._cache = {}
+        self.u, self.v = u, v
+        self.routes = {}          # route() results as (coords, length fractions); see export display cache
+        self.routes_dirty = False
 
     def nearest(self, ll):
         d, i = self.tree.query(to_xy([ll])[0])
@@ -157,26 +199,28 @@ class Router:
 
     # --- projection of free points (home, work, stops) onto the nearest street
     def _build_proj(self):
-        pts, eid, seg = [], [], []
-        e = self.net.edges
+        A, B, eid, seg, last, last_e, last_s = [], [], [], [], [], [], []
         seen = set()
         for i, g in enumerate(self.net.edge_geoms):
-            key = (min(e.u_idx.values[i], e.v_idx.values[i]), max(e.u_idx.values[i], e.v_idx.values[i]))
+            key = (min(self.u[i], self.v[i]), max(self.u[i], self.v[i]))
             if key in seen:      # one direction of a two-way street is enough for projection
                 continue
             seen.add(key)
             p = to_xy(g)
-            for s in range(len(p) - 1):
-                a, b = p[s], p[s + 1]
-                L = float(np.hypot(*(b - a)))
-                k = max(1, int(L / PROJ_STEP_M))
-                for t in np.linspace(0, 1, k + 1)[:-1]:
-                    pts.append(a + t * (b - a)); eid.append(i); seg.append(s)
-            pts.append(p[-1]); eid.append(i); seg.append(len(p) - 2)
-        self.ptree = cKDTree(np.asarray(pts))
-        self.p_xy = np.asarray(pts)
-        self.p_eid = np.asarray(eid)
-        self.p_seg = np.asarray(seg)
+            if len(p) < 2:
+                continue
+            A.append(p[:-1]); B.append(p[1:])
+            eid.append(np.full(len(p) - 1, i)); seg.append(np.arange(len(p) - 1))
+            last.append(p[-1]); last_e.append(i); last_s.append(len(p) - 2)
+        A, B, eid, seg = np.vstack(A), np.vstack(B), np.concatenate(eid), np.concatenate(seg)
+        k = np.maximum(1, (np.hypot(*(B - A).T) / PROJ_STEP_M).astype(int))   # points per segment
+        rep = np.repeat(np.arange(len(A)), k)
+        t = (np.arange(len(rep)) - np.repeat(np.cumsum(k) - k, k)) / k[rep]
+        pts = A[rep] + t[:, None] * (B - A)[rep]
+        self.p_xy = np.vstack([pts, np.asarray(last)])
+        self.p_eid = np.r_[eid[rep], last_e]
+        self.p_seg = np.r_[seg[rep], last_s]
+        self.ptree = cKDTree(self.p_xy)
 
     def project(self, ll):
         """(point on street [lng,lat], edge row, segment index, stub length m)."""
@@ -189,14 +233,25 @@ class Router:
         """Candidate (node, coords from point to node) for a free point projected on its edge."""
         P, i, s, stub = self.project(ll)
         g = self.net.edge_geoms[i]
-        e = self.net.edges
-        u, v = int(e.u_idx.values[i]), int(e.v_idx.values[i])
+        u, v = int(self.u[i]), int(self.v[i])
         to_u = [P] + [list(c) for c in g[s::-1]]
         to_v = [P] + [list(c) for c in g[s + 1:]]
         head = [list(ll)] if stub <= MAX_STUB_M else []
         return [(u, head + to_u), (v, head + to_v)], i
 
     def route(self, a_ll, b_ll, a_node=None, b_node=None):
+        return self.route_p(a_ll, b_ll, a_node, b_node)[0]
+
+    def route_p(self, a_ll, b_ll, a_node=None, b_node=None):
+        """Cached _route() as (deduped coords, cumulative length fractions)."""
+        key = (round(float(a_ll[0]), 6), round(float(a_ll[1]), 6), round(float(b_ll[0]), 6), round(float(b_ll[1]), 6),
+               a_node, b_node)
+        if key not in self.routes:
+            self.routes[key] = prep(self._route(a_ll, b_ll, a_node, b_node))
+            self.routes_dirty = True
+        return self.routes[key]
+
+    def _route(self, a_ll, b_ll, a_node=None, b_node=None):
         """Street route between two points (undirected, by length). Free endpoints are
         projected onto their nearest street; the straight stub to it is drawn only if
         <= MAX_STUB_M. Fixed endpoints (a_node / b_node) are network nodes."""
@@ -242,7 +297,10 @@ class Router:
 
 
 def _plen(c):
-    return sum(seg_len(a, b) for a, b in zip(c[:-1], c[1:]))
+    if len(c) < 2:
+        return 0.0
+    p = np.asarray(c, float)
+    return float(np.hypot((p[1:, 0] - p[:-1, 0]) * LAT0, p[1:, 1] - p[:-1, 1]).sum() * K)
 
 # ---------------------------------------------------------------------------- GTFS shapes
 _SHAPES = None
