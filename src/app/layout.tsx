@@ -1,36 +1,36 @@
 import type { Metadata } from "next";
-import { Bricolage_Grotesque, Instrument_Sans, JetBrains_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 
-/** Wordmark and headings. */
-const bricolage = Bricolage_Grotesque({
-  variable: "--font-bricolage",
+/** Wordmark and the verdict word. */
+const display = Space_Grotesk({
+  variable: "--font-display-face",
   subsets: ["latin"],
-  weight: ["600", "700", "800"],
+  weight: ["500", "600"],
 });
 
-/** Body text. */
-const instrument = Instrument_Sans({
-  variable: "--font-instrument",
+/** Everything else. */
+const body = Geist({
+  variable: "--font-body-face",
   subsets: ["latin"],
   weight: ["400", "500", "600"],
 });
 
-/** Numbers, labels, clock, legend. */
-const jetbrains = JetBrains_Mono({
-  variable: "--font-jetbrains",
+/** Numbers only. */
+const mono = Geist_Mono({
+  variable: "--font-mono-face",
   subsets: ["latin"],
-  weight: ["500", "700"],
+  weight: ["400", "500"],
 });
 
 export const metadata: Metadata = {
   title: "WhatIf ATL",
-  description: "Type a transit plan; see who wins, who pays, and the history it lands on.",
+  description: "Try a transit plan for Atlanta and see who it helps, who pays, and what happened last time.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${bricolage.variable} ${instrument.variable} ${jetbrains.variable} antialiased`}>
+    <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable} antialiased`}>
       <body>{children}</body>
     </html>
   );

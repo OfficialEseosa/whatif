@@ -14,7 +14,7 @@ export function PersonaChat({ personas }: { personas: Persona[] }) {
   return (
     <div className="chat stack-sm">
       <div className="row">
-        <strong className="grow">Talking to {persona.name}</strong>
+        <strong className="grow">Chat with {persona.name}</strong>
         <button className="btn" onClick={close}>
           Close
         </button>
@@ -36,9 +36,9 @@ export function PersonaChat({ personas }: { personas: Persona[] }) {
           setDraft("");
         }}
       >
-        <input className="input grow" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Ask about the plan" aria-label="Message" />
-        <button className="btn" type="submit" disabled={!draft.trim() || chat.pending}>
-          Ask
+        <input className="input grow" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Ask a question" aria-label="Message" />
+        <button className="btn btn-primary" type="submit" disabled={!draft.trim() || chat.pending}>
+          Send
         </button>
       </form>
     </div>

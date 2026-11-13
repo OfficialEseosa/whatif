@@ -1,59 +1,114 @@
 "use client";
+import { useRef } from "react";
 import { INITIAL_CAMERA, useStore } from "@/lib/store";
-import { HomeIcon, MinusIcon, PlusIcon } from "./icons";
+import { ResetIcon } from "./icons";
 
-const HAS_KEY = !!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+/** Degrees per step for the hold-to-repeat rotate/tilt buttons, and the repeat interval. */
+const STEP_BEARING = 6;
+const STEP_PITCH = 4;
+const REPEAT_MS = 70;
 
-/** Camera controls: home, 2D/3D, zoom, compass. */
-export function NavCluster() {
-  const view = useStore((s) => s.view);
-  const underground = useStore((s) => s.underground);
-  const bearing = useStore((s) => s.live.bearing);
-  const { set, flyTo } = useStore.getState();
-  const is3d = view === "photoreal";
-
-  const toggle3d = () => {
-    const { live } = useStore.getState();
-    set({ view: is3d ? "analysis" : "photoreal" });
-    flyTo({ pitch: is3d ? Math.min(live.pitch, 40) : Math.max(live.pitch, 60) }, 900);
+/** Press-and-hold repeat: fires once on press, then every REPEAT_MS until release. */
+function useHold(fn: () => void) {
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stop = () => {
+    if (timer.current) clearInterval(timer.current);
+    timer.current = null;
   };
-  const zoom = (d: number) => flyTo({ zoom: Math.max(2, Math.min(19, useStore.getState().live.zoom + d)) }, 300);
+  return {
+    onPointerDown: (e: React.PointerEvent) => {
+      e.preventDefault();
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+      fn();
+      stop();
+      timer.current = setInterval(fn, REPEAT_MS);
+    },
+    onPointerUp: stop,
+    onPointerCancel: stop,
+    onLostPointerCapture: stop,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        fn();
+      }
+    },
+  };
+}
+
+/**
+ * Camera buttons in the control bar: reset to Atlanta; a compass you can click (north up) or drag
+ * around to set the bearing; rotate left/right and tilt up/down with press-and-hold repeat.
+ */
+export function NavCluster() {
+  const bearing = useStore((s) => s.live.bearing);
+  const { flyTo, nudgeCamera } = useStore.getState();
+  const drag = useRef<{ cx: number; cy: number; moved: boolean } | null>(null);
+
+  const rotL = useHold(() => nudgeCamera({ dBearing: -STEP_BEARING }));
+  const rotR = useHold(() => nudgeCamera({ dBearing: STEP_BEARING }));
+  const tiltUp = useHold(() => nudgeCamera({ dPitch: STEP_PITCH }));
+  const tiltDown = useHold(() => nudgeCamera({ dPitch: -STEP_PITCH }));
+
+  const angleFrom = (e: React.PointerEvent) => {
+    const d = drag.current!;
+    // Bearing = direction of the pointer from the compass centre, clockwise from up.
+    return (Math.atan2(e.clientX - d.cx, -(e.clientY - d.cy)) * 180) / Math.PI;
+  };
 
   return (
-    <div className="nav" role="group" aria-label="Camera">
-      <button
-        className="nav-pill surface"
-        aria-pressed={underground}
-        onClick={() => set({ underground: !underground })}
-        title="Fade the surface to show MARTA tunnels and trains below ground"
-      >
-        Underground
+    <>
+      <button className="cbtn" onClick={() => flyTo(INITIAL_CAMERA, 1600)}>
+        <ResetIcon />
+        Reset
       </button>
-      <button className="icon-btn surface" aria-label="Fly to Atlanta" title="Fly to Atlanta" onClick={() => flyTo(INITIAL_CAMERA, 1600)}>
-        <HomeIcon />
+      <button className="cbtn cbtn-icon" aria-label="Rotate left (hold to repeat)" title="Rotate left" {...rotL}>
+        ⟲
       </button>
       <button
-        className="icon-btn surface nav-3d"
-        aria-pressed={is3d}
-        onClick={toggle3d}
-        title={is3d ? "Switch to the flat analysis map" : HAS_KEY ? "Switch to Google Photorealistic 3D" : "Tilt the map (photoreal buildings need NEXT_PUBLIC_GOOGLE_MAPS_API_KEY)"}
+        className="cbtn cbtn-icon"
+        aria-label="Compass: click to face north, drag around it to rotate"
+        title="Click: face north. Drag around: rotate"
+        onPointerDown={(e) => {
+          const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+          drag.current = { cx: r.left + r.width / 2, cy: r.top + r.height / 2, moved: false };
+          (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current;
+          if (!d) return;
+          if (!d.moved && Math.hypot(e.clientX - d.cx, e.clientY - d.cy) < 6) return;
+          d.moved = true;
+          // Dragging the needle: the map turns so north follows the pointer.
+          nudgeCamera({ bearing: -angleFrom(e) });
+        }}
+        onPointerUp={() => {
+          const d = drag.current;
+          drag.current = null;
+          if (d && !d.moved) flyTo({ bearing: 0 }, 500);
+        }}
+        onPointerCancel={() => (drag.current = null)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            flyTo({ bearing: 0 }, 500);
+          }
+        }}
+        style={{ touchAction: "none" }}
       >
-        {is3d ? "3D" : "2D"}
-      </button>
-      <div className="nav-zoom surface">
-        <button className="icon-btn" aria-label="Zoom out" title="Zoom out" onClick={() => zoom(-1)}>
-          <MinusIcon />
-        </button>
-        <button className="icon-btn" aria-label="Zoom in" title="Zoom in" onClick={() => zoom(1)}>
-          <PlusIcon />
-        </button>
-      </div>
-      <button className="icon-btn surface compass" aria-label="Face north" title="Face north (right-drag or Ctrl-drag the map to rotate and tilt)" onClick={() => flyTo({ bearing: 0 }, 500)}>
-        <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true" style={{ transform: `rotate(${-bearing}deg)` }}>
-          <path d="M13 2.5 17 13H9l4-10.5Z" fill="var(--poor)" />
-          <path d="M13 23.5 9 13h8l-4 10.5Z" fill="var(--text)" opacity="0.85" />
+        <svg className="north" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" style={{ transform: `rotate(${-bearing}deg)` }}>
+          <path d="M9 1.5 12.5 9h-7L9 1.5Z" fill="var(--loss)" />
+          <path d="M9 16.5 5.5 9h7L9 16.5Z" fill="currentColor" opacity="0.55" />
         </svg>
       </button>
-    </div>
+      <button className="cbtn cbtn-icon" aria-label="Rotate right (hold to repeat)" title="Rotate right" {...rotR}>
+        ⟳
+      </button>
+      <button className="cbtn cbtn-icon" aria-label="Tilt up (hold to repeat)" title="Tilt up" {...tiltUp}>
+        ⤒
+      </button>
+      <button className="cbtn cbtn-icon" aria-label="Tilt down (hold to repeat)" title="Tilt down" {...tiltDown}>
+        ⤓
+      </button>
+    </>
   );
 }

@@ -2,6 +2,7 @@
 import { useEffect } from "react";
 import { api } from "@/lib/api";
 import { useStore } from "@/lib/store";
+import { loadHeadways } from "@/components/map/transitService";
 
 /**
  * Loads the static network and a "today's network" scenario for the baseline morning rush:
@@ -21,6 +22,7 @@ export function useBootData() {
       .catch(() => api.scenarioFile("beltline-streetcar").then((s) => ({ ...s, source: "mock" as const })))
       .then((preview) => !cancelled && set({ preview }))
       .catch((e) => !cancelled && set({ error: String(e) }));
+    loadHeadways().then((headways) => !cancelled && set({ headways }));
     return () => {
       cancelled = true;
     };

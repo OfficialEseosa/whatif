@@ -6,7 +6,7 @@
  *   <id>.sim.json  prebaked Python sim runs (sim/run.py)
  */
 import "server-only";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import {
   ScenarioResultSchema,
@@ -18,18 +18,22 @@ import {
 export const MOCK_SCENARIO_ID = "beltline-streetcar";
 const DIR = path.join(process.cwd(), "public", "scenarios");
 
-const cache = new Map<string, Promise<ScenarioResult>>();
+const cache = new Map<string, { mtimeMs: number; size: number; result: Promise<ScenarioResult> }>();
 
-/** Loads and validates public/scenarios/<file> (cached per process). */
-function readFileScenario(file: string): Promise<ScenarioResult> {
-  if (!/^[a-z0-9][a-z0-9.-]*\.json$/.test(file)) return Promise.reject(new Error(`bad scenario file "${file}"`));
-  let p = cache.get(file);
-  if (!p) {
-    p = readFile(path.join(DIR, file), "utf8").then((raw) => ScenarioResultSchema.parse(JSON.parse(raw)));
-    p.catch(() => cache.delete(file));
-    cache.set(file, p);
-  }
-  return p;
+/**
+ * Loads and validates public/scenarios/<file>. Cached per process, but re-read when the file's
+ * mtime or size changes, so a re-baked *.sim.json is picked up without restarting the server.
+ */
+async function readFileScenario(file: string): Promise<ScenarioResult> {
+  if (!/^[a-z0-9][a-z0-9.-]*\.json$/.test(file)) throw new Error(`bad scenario file "${file}"`);
+  const full = path.join(DIR, file);
+  const st = await stat(full); // throws if missing (callers fall back)
+  const hit = cache.get(file);
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.result;
+  const result = readFile(full, "utf8").then((raw) => ScenarioResultSchema.parse(JSON.parse(raw)));
+  result.catch(() => cache.delete(file));
+  cache.set(file, { mtimeMs: st.mtimeMs, size: st.size, result });
+  return result;
 }
 
 /** The frontend mock scenario `<id>.json`. */

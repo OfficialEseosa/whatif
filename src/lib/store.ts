@@ -4,12 +4,13 @@
  */
 import { create } from "zustand";
 import historyJson from "@/data/history.json";
-import { SAMPLE_ARTICLE } from "@/lib/ai/mock";
+import { SAMPLE_ARTICLE, gazetteer } from "@/lib/ai/mock";
 import {
   HistorySchema,
   type ChatMessage,
   type ExtractedClaim,
   type HistoryEvent,
+  type ScenarioEdit,
   type Network,
   type PlanMode,
   type ScenarioResult,
@@ -20,7 +21,49 @@ export type Phase = "idle" | "planning" | "simulating" | "building" | "done" | "
 export type MapViewMode = "analysis" | "photoreal";
 export type Horizon = "opening" | "year5" | "year10";
 export type ResultsTab = "verdict" | "impact" | "whoPays" | "townHall";
-export type PipelineStep = { id: string; label: string; status: "pending" | "active" | "done" };
+export type PipelineStep = {
+  id: string;
+  label: string;
+  /** warn = finished, but with something the user must know (mock data, unmatched stops). */
+  status: "pending" | "active" | "done" | "warn" | "error";
+  /** performance.now() when the step started / finished (run panel timings). */
+  startedAt?: number;
+  endedAt?: number;
+};
+
+/** One Build it, kept after it finishes so its run log can be reopened. Times are performance.now(). */
+export type RunRecord = {
+  /** Run id (increments per Build it). */
+  id: number;
+  startedAt: number;
+  endedAt: number | null;
+  /** Steps with their own start/end times. */
+  steps: PipelineStep[];
+  /** Set when the run was started from an alternative's edit (skips /api/plan); Retry reuses it. */
+  overrideEdit: ScenarioEdit | null;
+  /** Follow-up prompt: the plan this run modifies (sent to /api/plan as previousEdit). */
+  previousEdit: ScenarioEdit | null;
+  /** Who produced the edit: the Claude parser, the canned mock parser, or a stored alternative. */
+  planSource: "claude" | "mock_parser" | "alternative" | null;
+  edit: ScenarioEdit | null;
+  claims: ExtractedClaim[] | null;
+  /** checkEditAgainstGazetteer problems for the placed stops. */
+  stopProblems: string[];
+  /** When the placed stops start pinging on the map (one after another). */
+  pingAt: number | null;
+  /** Wall time of the whole simulate step, and its parts. */
+  simMs: number | null;
+  /** Time of the POST /api/simulate call alone. */
+  routeMs: number | null;
+  /** Set when the route pointed at a stored file and the client fetched it. */
+  file: { url: string; ms: number; bytes: number } | null;
+  result: ScenarioResult | null;
+  error: { step: string; message: string } | null;
+  cancelled: boolean;
+};
+
+/** How many past runs to keep. */
+export const MAX_RUNS = 12;
 
 /** Camera target; set it to move the camera (with an optional transition). */
 export type CameraTarget = {
@@ -75,6 +118,9 @@ export const LAYER_META: Record<LayerKey, { label: string; group: LayerGroup; re
   history: { label: "History overlay", group: "Context", colorKey: "history" },
 };
 
+/** Photoreal 3D tile detail. High (loaders.gl default detail) is the default; Low is a fallback for weak GPUs. */
+export type Quality3d = "low" | "high";
+
 export const DEFAULT_LAYER_VISIBILITY: Record<LayerKey, boolean> = {
   proposedLine: true,
   martaRail: true,
@@ -108,7 +154,14 @@ type State = {
   text: string;
   phase: Phase;
   error: string | null;
+  /** Steps of the current or last run (kept after it finishes). */
   pipeline: PipelineStep[];
+  /** Recent runs, oldest first (at most MAX_RUNS). */
+  runs: RunRecord[];
+  /** Run whose log the run panel shows; null hides it ("New plan"). */
+  activeRunId: number | null;
+  /** Stop index hovered in the run panel; the map highlights its ping. */
+  runHoverStop: number | null;
   /** Prebaked scenario loaded at boot; only its baseline trips are shown before a build. */
   preview: ScenarioResult | null;
   /** Result of the last Build it. */
@@ -137,12 +190,25 @@ type State = {
   chat: { personaId: string; messages: ChatMessage[]; pending: boolean } | null;
   /** Which map layers are drawn. Features that switch layers (history cards, Underground, Who pays) set these. */
   layerVisibility: Record<LayerKey, boolean>;
+  /** GTFS 7-9 AM headways (minutes) per network line id, from transit-service.sim.json; null = placeholders. */
+  headways: Record<string, number> | null;
+  /** Photoreal 3D quality (tile detail, cache, pixel ratio). */
+  quality3d: Quality3d;
+  /** Relative or absolute camera rotation request (compass drag, rotate/tilt buttons). DeckMap applies it. */
+  cameraNudge: { seq: number; dBearing?: number; dPitch?: number; bearing?: number; pitch?: number; ms?: number } | null;
 };
 
 type Actions = {
   set: (patch: Partial<State>) => void;
   setInputMode: (m: PlanMode) => void;
   setPipelineStep: (id: string, patch: Partial<PipelineStep>) => void;
+  /** Adds a run (dropping the oldest past MAX_RUNS) and makes it active. */
+  addRun: (run: RunRecord) => void;
+  patchRun: (id: number, patch: Partial<RunRecord>) => void;
+  /** Updates one step of a run (and mirrors it into `pipeline` when it is the active run). */
+  setRunStep: (id: number, stepId: string, patch: Partial<PipelineStep>) => void;
+  /** Hides the run panel (e.g. "New plan"); past runs stay in `runs`. */
+  resetRun: () => void;
   toggleHistory: (id: string) => void;
   toggleDrawer: (d: Drawer) => void;
   /** Move the camera from where it is now. */
@@ -151,6 +217,12 @@ type Actions = {
   closeChat: () => void;
   setLayerVisible: (key: LayerKey, on: boolean) => void;
   toggleLayer: (key: LayerKey) => void;
+  /** Back to DEFAULT_LAYER_VISIBILITY ("Clear map"). */
+  resetLayerVisibility: () => void;
+  /** Fly the camera to a gazetteer place (e.g. "clarkston"). Returns false for an unknown id. */
+  flyToPlace: (id: string, zoom?: number) => boolean;
+  /** Rotate/tilt the camera from where it is (dBearing/dPitch, degrees) or to an absolute bearing/pitch. */
+  nudgeCamera: (n: { dBearing?: number; dPitch?: number; bearing?: number; pitch?: number; ms?: number }) => void;
 };
 
 export const useStore = create<State & Actions>((set) => ({
@@ -159,6 +231,9 @@ export const useStore = create<State & Actions>((set) => ({
   phase: "idle",
   error: null,
   pipeline: [],
+  runs: [],
+  activeRunId: null,
+  runHoverStop: null,
   preview: null,
   scenario: null,
   claims: null,
@@ -181,11 +256,23 @@ export const useStore = create<State & Actions>((set) => ({
   switchProgress: 0,
   chat: null,
   layerVisibility: DEFAULT_LAYER_VISIBILITY,
+  headways: null,
+  quality3d: "high",
+  cameraNudge: null,
 
   set: (patch) => set(patch),
   setInputMode: (m) => set({ inputMode: m, text: DEFAULT_TEXT[m] }),
   setPipelineStep: (id, patch) =>
     set((s) => ({ pipeline: s.pipeline.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
+  addRun: (run) => set((s) => ({ runs: [...s.runs, run].slice(-MAX_RUNS), activeRunId: run.id, pipeline: run.steps, runHoverStop: null })),
+  patchRun: (id, patch) => set((s) => ({ runs: s.runs.map((r) => (r.id === id ? { ...r, ...patch } : r)) })),
+  setRunStep: (id, stepId, patch) =>
+    set((s) => {
+      const runs = s.runs.map((r) => (r.id === id ? { ...r, steps: r.steps.map((p) => (p.id === stepId ? { ...p, ...patch } : p)) } : r));
+      const run = runs.find((r) => r.id === id);
+      return s.activeRunId === id && run ? { runs, pipeline: run.steps } : { runs };
+    }),
+  resetRun: () => set({ activeRunId: null, pipeline: [], runHoverStop: null }),
   toggleHistory: (id) => set((s) => ({ activeHistoryId: s.activeHistoryId === id ? null : id })),
   toggleDrawer: (d) => set((s) => ({ drawer: s.drawer === d ? null : d })),
   flyTo: (patch, ms = 500) =>
@@ -200,6 +287,14 @@ export const useStore = create<State & Actions>((set) => ({
   closeChat: () => set({ chat: null }),
   setLayerVisible: (key, on) => set((s) => ({ layerVisibility: { ...s.layerVisibility, [key]: on } })),
   toggleLayer: (key) => set((s) => ({ layerVisibility: { ...s.layerVisibility, [key]: !s.layerVisibility[key] } })),
+  resetLayerVisibility: () => set({ layerVisibility: DEFAULT_LAYER_VISIBILITY }),
+  nudgeCamera: (n) => set((s) => ({ cameraNudge: { ...n, seq: (s.cameraNudge?.seq ?? 0) + 1 } })),
+  flyToPlace: (id, zoom = 14.5) => {
+    const p = gazetteer.find((g) => g.id === id);
+    if (!p) return false;
+    useStore.getState().flyTo({ longitude: p.coord[0], latitude: p.coord[1], zoom }, 1800);
+    return true;
+  },
 }));
 
 /**
@@ -219,6 +314,8 @@ useStore.subscribe((s, prev) => {
   if (changed.length) useStore.setState({ layerVisibility: { ...s.layerVisibility, ...patch } });
 });
 
+/** The run the run panel shows (null when hidden). */
+export const selectActiveRun = (s: State) => (s.activeRunId === null ? null : (s.runs.find((r) => r.id === s.activeRunId) ?? null));
 
 /** The scenario whose agents/geometry the map should draw right now. */
 export const selectMapScenario = (s: State) => s.scenario ?? s.preview;

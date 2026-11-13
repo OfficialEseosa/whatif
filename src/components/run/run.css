@@ -1,0 +1,152 @@
+/*
+ * Run panel drawn as a route line, like the logo: stops joined by a line, the last stop a lime ring.
+ * Solid near-black surface, hairline border, 6px radius, 8px grid. One font family; timings use
+ * tabular numerals. The accent appears only on the active stop and the final ring.
+ */
+.rp {
+  --rp-surface: var(--paper-solid, #16181d);
+  --rp-hover: rgba(255, 255, 255, 0.06);
+  --rp-text: var(--ink, #eceef1);
+  --rp-muted: var(--ink-2, rgba(255, 255, 255, 0.64));
+  --rp-dim: rgba(255, 255, 255, 0.28);
+  --rp-line: var(--rule, rgba(255, 255, 255, 0.1));
+  --rp-accent: var(--accent, #c6f432);
+  --rp-on-accent: var(--on-accent, #10130a);
+  --rp-loss: var(--loss, #e8806f);
+  --rp-amber: var(--fair, #d6b36a);
+  --rp-ease: cubic-bezier(0.23, 1, 0.32, 1);
+
+  position: relative;
+  z-index: 6;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  color: var(--rp-text);
+  font-family: var(--font-body, system-ui, sans-serif);
+  font-size: 15px;
+  line-height: 22px;
+}
+.rp *,
+.rp *::before,
+.rp *::after { box-sizing: border-box; }
+
+.rp-card,
+.rp-bar {
+  background: var(--rp-surface);
+  border: 1px solid var(--rp-line);
+  border-radius: var(--radius, 6px);
+}
+.rp-card { display: flex; flex-direction: column; max-height: calc(100vh - 220px); overflow: hidden; animation: rp-in 220ms var(--rp-ease) both; }
+@keyframes rp-in { from { opacity: 0; transform: translateY(-8px) scale(0.98); } }
+
+/* buttons: hover, focus-visible and press states everywhere */
+:where(.rp button) { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; transition: background-color 150ms var(--rp-ease), transform 150ms var(--rp-ease); }
+.rp button:active:not(:disabled) { transform: scale(0.97); }
+.rp button:focus-visible { outline: 2px solid var(--rp-text); outline-offset: 2px; }
+.rp button:disabled { cursor: default; }
+
+/* ---------- header ---------- */
+.rp-head { display: flex; align-items: flex-start; gap: 8px; padding: 16px 12px 16px 20px; border-bottom: 1px solid var(--rp-line); }
+.rp-head-text { flex: 1; min-width: 0; }
+.rp-title { margin: 0; font-size: 19px; line-height: 26px; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.rp-sub { margin: 2px 0 0; font-size: 14px; line-height: 20px; color: var(--rp-muted); font-variant-numeric: tabular-nums; }
+.rp-sub.is-error { color: var(--rp-loss); }
+.rp-close { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: var(--radius-sm, 4px); color: var(--rp-muted); }
+.rp-close:hover { background: var(--rp-hover); color: var(--rp-text); }
+.rp-flip { display: grid; transform: rotate(180deg); }
+
+/* ---------- the route ---------- */
+.rp-route { list-style: none; margin: 0; padding: 16px 20px 8px 16px; overflow: auto; min-height: 0; scrollbar-width: thin; }
+.rp-step { position: relative; display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; padding-bottom: 16px; }
+.rp-step:last-child { padding-bottom: 8px; }
+.rp-step-body { grid-column: 2; min-width: 0; }
+
+/* connector from this stop's centre to the next stop's centre: dashed until the step is done, then a solid line draws down */
+.rp-seg { position: absolute; left: 11px; top: 12px; bottom: -12px; width: 2px; border-left: 2px dashed var(--rp-dim); }
+.rp-seg-fill { position: absolute; left: -2px; top: 0; bottom: 0; width: 2px; background: var(--rp-text); transform: scaleY(0); transform-origin: top; transition: transform 250ms var(--rp-ease); }
+.rp-step.is-done .rp-seg-fill { transform: scaleY(1); }
+
+/* stop markers */
+.rp-node { position: absolute; z-index: 1; left: 12px; top: 12px; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; }
+.rp-node.is-done { background: var(--rp-text); }
+.rp-node.is-pending { background: var(--rp-surface); border: 2px solid var(--rp-dim); }
+.rp-node.is-error { background: var(--rp-loss); }
+.rp-node.is-active,
+.rp-node.is-end { width: 16px; height: 16px; margin: -8px 0 0 -8px; background: var(--rp-surface); border: 3px solid var(--rp-accent); }
+.rp-node.is-active { animation: rp-pulse 1.6s ease-in-out infinite; }
+@keyframes rp-pulse { 50% { border-color: color-mix(in srgb, var(--rp-accent) 45%, var(--rp-surface)); } }
+
+.rp-step-head { display: flex; align-items: baseline; gap: 12px; width: 100%; text-align: left; border-radius: var(--radius-sm, 4px); }
+.rp-step-head:not(:disabled):hover .rp-step-title { text-decoration: underline; text-decoration-color: var(--rp-dim); text-underline-offset: 4px; }
+.rp-step-title { flex: 1; min-width: 0; font-size: 16px; line-height: 24px; font-weight: 500; }
+.rp-step.is-pending .rp-step-title { color: var(--rp-muted); }
+.rp-time { font-size: 13px; line-height: 24px; color: var(--rp-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rp-step.is-active .rp-time { color: var(--rp-text); }
+
+.rp-line { margin: 0; font-size: 15px; line-height: 22px; color: var(--rp-muted); overflow-wrap: anywhere; }
+.rp-line.is-error { color: var(--rp-loss); }
+.rp-amber { color: var(--rp-amber); }
+.rp-line-block { display: grid; gap: 8px; }
+.rp-line-block .rp-actions { align-items: center; }
+
+/* the one progress element: the active "Draw line" step */
+.rp-progress { display: block; position: relative; height: 2px; background: var(--rp-line); overflow: hidden; }
+.rp-progress-fill { position: absolute; inset: 0; background: var(--rp-text); transform: scaleX(0); transform-origin: left; }
+
+/* ---------- details (opened by clicking a finished stop) ---------- */
+.rp-detail { display: grid; gap: 8px; margin-top: 8px; animation: rp-open 200ms var(--rp-ease) both; }
+@keyframes rp-open { from { opacity: 0; transform: translateY(-4px); } }
+.rp-label { font-size: 13px; color: var(--rp-muted); }
+.rp-quotes { display: grid; gap: 4px; }
+.rp-quote { margin: 0; font-size: 14px; line-height: 20px; color: var(--rp-text); }
+.rp-more { justify-self: start; font-size: 13px; color: var(--rp-muted); text-decoration: underline; text-underline-offset: 3px; }
+.rp-more:hover { color: var(--rp-text); }
+.rp-problems { margin: 0; padding: 0; list-style: none; color: var(--rp-loss); font-size: 13px; }
+.rp-stops { list-style: none; margin: 0 0 0 -6px; padding: 0; display: grid; }
+.rp-place { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 8px; width: 100%; padding: 4px 6px; border-radius: var(--radius-sm, 4px); font-size: 14px; text-align: left; }
+.rp-place:hover, .rp-place.is-hover { background: var(--rp-hover); }
+.rp-place-kind { display: grid; place-items: center; color: var(--rp-muted); }
+.rp-place-name { overflow-wrap: anywhere; }
+.rp-kv { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; margin: 0; font-size: 14px; line-height: 20px; }
+.rp-kv dt { color: var(--rp-muted); }
+.rp-kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rp-tests { list-style: none; margin: 0 0 0 -6px; padding: 0; display: grid; }
+.rp-test { display: flex; justify-content: space-between; gap: 16px; padding: 4px 6px; border-radius: var(--radius-sm, 4px); font-size: 14px; line-height: 20px; }
+.rp-test.is-linked { cursor: pointer; }
+.rp-test.is-linked:hover { background: var(--rp-hover); }
+.rp-test-label { color: var(--rp-muted); }
+.rp-test-val { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rp-test-val.is-good { color: var(--gain, #7fcf9f); }
+.rp-test-val.is-poor { color: var(--rp-loss); }
+.rp-test-val.is-fair { color: var(--rp-amber); }
+.rp-tag { color: var(--rp-muted); font-size: 13px; }
+
+.rp-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.rp-btn { height: 32px; padding: 0 12px; font-size: 14px; font-weight: 500; border-radius: var(--radius-sm, 4px); border: 1px solid var(--rp-line); }
+.rp-btn:hover { background: var(--rp-hover); }
+.rp-btn.is-primary { background: var(--rp-text); color: var(--rp-surface); border-color: var(--rp-text); }
+.rp-btn.is-primary:hover { background: #fff; }
+
+/* ---------- folded bar ---------- */
+.rp-bar { display: grid; grid-template-columns: 16px minmax(0, 1fr) 16px; align-items: center; gap: 12px; width: 100%; padding: 10px 12px 10px 16px; text-align: left; animation: rp-in 220ms var(--rp-ease) both; }
+.rp-bar:hover { background: color-mix(in srgb, var(--rp-surface) 92%, #fff); }
+.rp-bar .rp-node { position: static; margin: 0; }
+.rp-bar > svg { color: var(--rp-muted); }
+.rp-bar-text { display: grid; min-width: 0; }
+.rp-bar-title { font-size: 15px; line-height: 22px; font-weight: 600; overflow-wrap: anywhere; }
+.rp-bar-sub { font-size: 13px; line-height: 18px; color: var(--rp-muted); font-variant-numeric: tabular-nums; }
+
+.rp-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- narrow screens ---------- */
+@media (max-width: 899px) {
+  .rp { position: fixed; top: auto; bottom: var(--run-bottom, 132px); left: 12px; right: 12px; width: auto; max-width: none; }
+  .rp-card { max-height: 40vh; }
+}
+
+/* ---------- reduced motion: no movement, no pulse; states swap instantly ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .rp-card, .rp-bar, .rp-detail, .rp-node.is-active { animation: none; }
+  .rp-seg-fill, .rp button { transition: none; }
+  .rp button:active:not(:disabled) { transform: none; }
+}
+.rp-small { font-size: 13px; line-height: 18px; }

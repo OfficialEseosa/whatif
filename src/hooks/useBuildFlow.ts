@@ -1,20 +1,22 @@
 "use client";
 import { useCallback } from "react";
 import { api } from "@/lib/api";
-import type { ScenarioEdit, ScenarioResult } from "@/lib/contract";
-import { useStore, type PipelineStep } from "@/lib/store";
-import { sleep, tween } from "./useReducedMotion";
+import { gazetteer } from "@/lib/ai/mock";
+import { checkEditAgainstGazetteer, type ScenarioEdit, type ScenarioResult } from "@/lib/contract";
+import { useStore, type PipelineStep, type RunRecord } from "@/lib/store";
+import { prefersReducedMotion } from "./useReducedMotion";
 
-const STEPS: PipelineStep[] = [
-  { id: "plan", label: "Reading the plan", status: "pending" },
-  { id: "stops", label: "Placing stops from the gazetteer", status: "pending" },
-  { id: "edit", label: "Editing the network", status: "pending" },
-  { id: "route", label: "Routing commuters", status: "pending" },
-  { id: "score", label: "Scoring stakes", status: "pending" },
-  { id: "draw", label: "Drawing the line", status: "pending" },
+export const RUN_STEPS: PipelineStep[] = [
+  { id: "plan", label: "Read plan", status: "pending" },
+  { id: "stops", label: "Place stops", status: "pending" },
+  { id: "edit", label: "Edit network", status: "pending" },
+  { id: "route", label: "Route commuters", status: "pending" },
+  { id: "score", label: "Score", status: "pending" },
+  { id: "draw", label: "Draw line", status: "pending" },
 ];
 
 const BEARING = -20;
+let runSeq = 0;
 
 /** Fit the camera to the proposed line, shifted so the line sits left of the results card on wide screens. */
 function cameraFor(result: ScenarioResult, photoreal: boolean) {
@@ -29,57 +31,160 @@ function cameraFor(result: ScenarioResult, photoreal: boolean) {
     longitude: (Math.max(...lng) + Math.min(...lng)) / 2 + shift * Math.cos(b),
     latitude: (Math.max(...lat) + Math.min(...lat)) / 2 - shift * Math.sin(b) * 0.83,
     zoom: Math.min(16, Math.log2(0.6 / span) + 9.3),
-    pitch: photoreal ? 60 : 50,
+    pitch: photoreal ? 50 : 50, // photoreal: moderate tilt keeps the tile count down
     bearing: BEARING,
     transitionDuration: 1800,
   };
 }
 
 /**
- * Build it: /api/plan -> pipeline steps -> /api/simulate -> line draws -> agents switch -> panels fill.
- * `overrideEdit` skips /api/plan (used by "Three plans that score better").
+ * Eased 0..1 animation on wall-clock time. Same curve as `tween`, but it also finishes on a timer:
+ * a hidden or throttled tab pauses requestAnimationFrame, which used to stretch the "Draw line"
+ * step to 18 s. Now the step always measures the line animation itself (about 3.8 s).
+ */
+function animate(ms: number, onFrame: (k: number) => void): Promise<void> {
+  if (prefersReducedMotion() || ms <= 0) {
+    onFrame(1);
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const t0 = performance.now();
+    let raf = 0;
+    let done = false;
+    const end = () => {
+      if (done) return;
+      done = true;
+      cancelAnimationFrame(raf);
+      clearTimeout(timer);
+      onFrame(1);
+      resolve();
+    };
+    const step = (now: number) => {
+      const k = Math.min(1, (now - t0) / ms);
+      if (k >= 1) return end();
+      onFrame(1 - Math.pow(1 - k, 3));
+      raf = requestAnimationFrame(step);
+    };
+    const timer = setTimeout(end, ms + 50);
+    raf = requestAnimationFrame(step);
+  });
+}
+
+/** Stops the active run (if still going) from writing further results; used by the run panel's Cancel. */
+export function cancelRun() {
+  const s = useStore.getState();
+  const run = s.runs.find((r) => r.id === runSeq);
+  if (!run || run.endedAt !== null) return;
+  runSeq++; // the in-flight build sees it is stale and stops
+  const now = performance.now();
+  const active = run.steps.find((p) => p.status === "active");
+  if (active) s.setRunStep(run.id, active.id, { status: "error", endedAt: now });
+  s.patchRun(run.id, { endedAt: now, cancelled: true, error: { step: active?.id ?? "route", message: "Cancelled. The server may still finish; its result will be ignored." } });
+  s.set({ phase: "error", error: "Cancelled" });
+}
+
+export type BuildOptions = {
+  /** Follow-up prompt: the plan being modified; passed to /api/plan. */
+  previousEdit?: ScenarioEdit;
+};
+
+/**
+ * Build it: /api/plan -> place stops -> edit network -> /api/simulate -> score -> line draws -> agents switch.
+ * Every step records real start/end times in store.runs; nothing waits on a timer. `overrideEdit`
+ * skips /api/plan (used by "Three plans that score better").
  */
 export function useBuildFlow() {
-  return useCallback(async (overrideEdit?: ScenarioEdit) => {
+  return useCallback(async (overrideEdit?: ScenarioEdit, opts?: BuildOptions) => {
     const s = useStore.getState();
     if (s.phase === "planning" || s.phase === "simulating" || s.phase === "building") return;
-    const step = s.setPipelineStep;
-    s.set({ phase: "planning", error: null, pipeline: STEPS, lineProgress: 0, switchProgress: 0, chat: null, scenario: null, highlightZone: null });
+    const id = ++runSeq;
+    const live = () => id === runSeq;
+    const previousEdit = opts?.previousEdit ?? null;
+    const run: RunRecord = {
+      id,
+      startedAt: performance.now(),
+      endedAt: null,
+      steps: RUN_STEPS.map((p) => ({ ...p })),
+      overrideEdit: overrideEdit ?? null,
+      previousEdit,
+      planSource: null,
+      edit: null,
+      claims: null,
+      stopProblems: [],
+      pingAt: null,
+      simMs: null,
+      routeMs: null,
+      file: null,
+      result: null,
+      error: null,
+      cancelled: false,
+    };
+    s.addRun(run);
+    s.set({ phase: "planning", error: null, lineProgress: 0, switchProgress: 0, chat: null, scenario: null, highlightZone: null });
+    const st = () => useStore.getState();
+    const patch = (p: Partial<RunRecord>) => st().patchRun(id, p);
+    const start = (step: string) => st().setRunStep(id, step, { status: "active", startedAt: performance.now() });
+    const finish = (step: string, status: PipelineStep["status"] = "done") => st().setRunStep(id, step, { status, endedAt: performance.now() });
+    let current = "plan";
+
     try {
-      step("plan", { status: "active" });
+      // 1. Read plan
+      start("plan");
       const plan = overrideEdit
-        ? { edit: overrideEdit, claims: undefined }
-        : await api.plan({ text: s.text, mode: s.inputMode });
-      step("plan", { status: "done", label: `Read the plan: ${plan.edit.name}` });
+        ? { edit: overrideEdit, claims: undefined, isMock: false }
+        : await api.plan({ text: s.text, mode: s.inputMode, ...(previousEdit ? { previousEdit } : {}) });
+      if (!live()) return;
+      patch({ edit: plan.edit, claims: plan.claims ?? null, planSource: overrideEdit ? "alternative" : plan.isMock ? "mock_parser" : "claude" });
+      finish("plan", !overrideEdit && plan.isMock ? "warn" : "done");
 
-      step("stops", { status: "active" });
-      await sleep(350);
-      step("stops", { status: "done", label: `Placed ${plan.edit.stops.length} stops from the gazetteer` });
+      // 2. Place stops: a local gazetteer lookup, so it finishes immediately.
+      current = "stops";
+      start("stops");
+      const problems = checkEditAgainstGazetteer(plan.edit, gazetteer);
+      patch({ stopProblems: problems, pingAt: plan.edit.stops.length ? performance.now() : null });
+      finish("stops", problems.length ? "warn" : "done");
 
-      step("edit", { status: "active" });
-      await sleep(300);
-      step("edit", { status: "done" });
+      // 3. Edit network: applied by the simulation; the panel summarises the edit.
+      current = "edit";
+      start("edit");
+      finish("edit");
 
-      useStore.getState().set({ phase: "simulating", claims: plan.claims ?? null });
-      step("route", { status: "active" });
-      const result = await api.simulate({ edit: plan.edit, claims: plan.claims });
-      step("route", { status: "done", label: `Routed ${result.metrics.proposed.populationModeled.toLocaleString("en-US")} commuters` });
+      // 4. Route commuters (the only slow step).
+      current = "route";
+      st().set({ phase: "simulating", claims: plan.claims ?? null });
+      start("route");
+      const simStart = performance.now();
+      const { result, timing } = await api.simulateTimed({ edit: plan.edit, claims: plan.claims });
+      if (!live()) return;
+      patch({ simMs: performance.now() - simStart, routeMs: timing.routeMs, file: timing.file, result });
+      finish("route", result.source === "mock" || result.isMock ? "warn" : "done");
 
-      step("score", { status: "active" });
-      await sleep(300);
-      step("score", { status: "done", label: `Scored ${result.agents.length.toLocaleString("en-US")} stakes` });
+      // 5. Score stakes: computed by the simulation in the same result; recorded as its own step.
+      current = "score";
+      start("score");
+      finish("score");
 
-      step("draw", { status: "active" });
-      const st = useStore.getState();
-      st.set({ phase: "building", scenario: result, camera: cameraFor(result, st.view === "photoreal") });
-      await tween(2200, (k) => useStore.getState().set({ lineProgress: k }));
-      await tween(1600, (k) => useStore.getState().set({ switchProgress: k }));
-      step("draw", { status: "done" });
-      useStore.getState().set({ phase: "done", tab: "verdict" });
-      await sleep(1500);
-      if (useStore.getState().phase === "done") useStore.getState().set({ pipeline: [] });
+      // 6. Draw line: the real map animation; the panel reads lineProgress / switchProgress.
+      current = "draw";
+      // The step's timer starts with the line animation itself, not the camera wait or map render before it.
+      st().setRunStep(id, "draw", { status: "active" });
+      st().set({ phase: "building", scenario: result, camera: cameraFor(result, st().view === "photoreal") });
+      // Stagger instead of animating everything at once: let the camera land, then draw the line,
+      // then switch commuters in 3 steps (each step rebuilds trip data for every agent, so not per frame).
+      await animate(1500, () => {});
+      if (live()) st().setRunStep(id, "draw", { startedAt: performance.now() });
+      await animate(2200, (k) => live() && st().set({ lineProgress: k }));
+      await animate(1600, (k) => live() && st().set({ switchProgress: Math.round(k * 3) / 3 }));
+      if (!live()) return;
+      finish("draw");
+      patch({ endedAt: performance.now() });
+      st().set({ phase: "done", tab: "verdict" });
     } catch (e) {
-      useStore.getState().set({ phase: "error", error: e instanceof Error ? e.message : String(e) });
+      if (!live()) return;
+      const message = e instanceof Error ? e.message : String(e);
+      st().setRunStep(id, current, { status: "error", endedAt: performance.now() });
+      patch({ endedAt: performance.now(), error: { step: current, message } });
+      st().set({ phase: "error", error: message });
     }
   }, []);
 }

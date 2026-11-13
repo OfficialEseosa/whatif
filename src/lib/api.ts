@@ -4,6 +4,7 @@ import {
   PersonaResponseSchema,
   PlanResponseSchema,
   ScenarioResultSchema,
+  SimulatePointerSchema,
   type Network,
   type PersonaRequest,
   type PlanRequest,
@@ -29,9 +30,60 @@ const post = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
+/** Timings of one /api/simulate call, for the run panel. */
+export type SimulateTiming = {
+  /** The POST to /api/simulate. */
+  routeMs: number;
+  /** Set when the route pointed at a stored file: the static fetch of it. */
+  file: { url: string; ms: number; bytes: number } | null;
+};
+
+/**
+ * POST /api/simulate. Stored results come back as a pointer (Vercel caps function responses at 4.5 MB):
+ * fetch the static file, validate it, and stamp source / mockSections / isMock as the route used to.
+ */
+async function simulate(req: SimulateRequest): Promise<{ result: ScenarioResult; timing: SimulateTiming }> {
+  const t0 = performance.now();
+  const res = await fetch("/api/simulate", post(req));
+  const json = await res.json().catch(() => null);
+  const routeMs = performance.now() - t0;
+  if (!res.ok) throw new Error(json?.error ? `/api/simulate: ${json.error}` : `/api/simulate: HTTP ${res.status}`);
+  if (json && typeof json === "object" && "scenarioUrl" in json) {
+    const ptr = SimulatePointerSchema.safeParse(json);
+    if (!ptr.success) throw new Error("/api/simulate: pointer does not match the contract");
+    const t1 = performance.now();
+    const fileRes = await fetch(ptr.data.scenarioUrl);
+    if (!fileRes.ok) throw new Error(`${ptr.data.scenarioUrl}: HTTP ${fileRes.status}`);
+    const text = await fileRes.text();
+    const parsed = ScenarioResultSchema.safeParse(JSON.parse(text));
+    if (!parsed.success) {
+      console.error(ptr.data.scenarioUrl, parsed.error.issues.slice(0, 10));
+      throw new Error(`${ptr.data.scenarioUrl}: file does not match the contract`);
+    }
+    const { source, mockSections, isMock } = ptr.data;
+    const result: ScenarioResult = {
+      ...parsed.data,
+      source,
+      mockSections: mockSections ?? parsed.data.mockSections ?? [],
+      isMock: isMock ?? (source === "mock" || parsed.data.isMock),
+      // Article claims are only meaningful when the plan came from an article (as the route did).
+      claims: req.claims?.length ? parsed.data.claims : [],
+    };
+    return { result, timing: { routeMs, file: { url: ptr.data.scenarioUrl, ms: performance.now() - t1, bytes: text.length } } };
+  }
+  const parsed = ScenarioResultSchema.safeParse(json);
+  if (!parsed.success) {
+    console.error("/api/simulate", parsed.error.issues.slice(0, 10));
+    throw new Error("/api/simulate: response does not match the contract");
+  }
+  return { result: parsed.data, timing: { routeMs, file: null } };
+}
+
 export const api = {
   plan: (req: PlanRequest) => call("/api/plan", PlanResponseSchema, post(req)),
-  simulate: (req: SimulateRequest) => call("/api/simulate", ScenarioResultSchema, post(req)),
+  simulate: (req: SimulateRequest) => simulate(req).then((r) => r.result),
+  /** Same as simulate, plus where the time went (route call, static file fetch). */
+  simulateTimed: simulate,
   persona: (req: PersonaRequest) => call("/api/persona", PersonaResponseSchema, post(req)),
   /** Static context geometry (roads, rail, Beltline, overlays). */
   network: (url = "/scenarios/network.json"): Promise<Network> => call(url, NetworkSchema),

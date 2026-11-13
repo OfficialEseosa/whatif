@@ -24,9 +24,18 @@ const check = (name, schema, value) => {
 
 const plan = check("POST /api/plan (prompt)", C.PlanResponseSchema, await post("/api/plan", { text: "extend the streetcar to Ponce City Market", mode: "prompt" }));
 const article = check("POST /api/plan (article)", C.PlanResponseSchema, await post("/api/plan", { text: "Backers say it could carry 10,000 riders a day.", mode: "article" }));
-const sim = check("POST /api/simulate", C.ScenarioResultSchema, await post("/api/simulate", { edit: plan.edit, claims: article.claims }));
+// /api/simulate returns a full result (live sim) or a small pointer to a stored file (prebaked / mock),
+// which the client fetches and stamps with source / mockSections / isMock (src/lib/api.ts).
+async function simulate(name, body) {
+  const res = check(name, C.SimulateRouteResponseSchema, await post("/api/simulate", body));
+  if (!("scenarioUrl" in res)) return check(`${name} result`, C.ScenarioResultSchema, res);
+  console.log(`     pointer -> ${res.scenarioUrl} (${JSON.stringify(res).length} bytes)`);
+  const file = check(`GET ${res.scenarioUrl}`, C.ScenarioResultSchema, await (await fetch(base + res.scenarioUrl)).json());
+  return { ...file, source: res.source, mockSections: res.mockSections ?? file.mockSections, isMock: res.isMock ?? file.isMock, claims: body.claims?.length ? file.claims : [] };
+}
+const sim = await simulate("POST /api/simulate", { edit: plan.edit, claims: article.claims });
 console.log(`     source=${sim.source} isMock=${sim.isMock} agents=${sim.agents.length} claims=${sim.claims.length} mockSections=${(sim.mockSections ?? []).length}`);
-const other = check("POST /api/simulate (unmatched edit)", C.ScenarioResultSchema, await post("/api/simulate", { edit: { type: "change_frequency", name: "Loop every 8 min", stops: [], baseLineId: "atlanta_streetcar", headwayMin: 8 } }));
+const other = await simulate("POST /api/simulate (unmatched edit)", { edit: { type: "change_frequency", name: "Loop every 8 min", stops: [], baseLineId: "atlanta_streetcar", headwayMin: 8 } });
 console.log(`     source=${other.source} isMock=${other.isMock}`);
 const p = sim.personas[0];
 check("POST /api/persona", C.PersonaResponseSchema, await post("/api/persona", { scenarioId: sim.id, personaId: p.id, messages: [{ role: "user", content: "How does this change your commute?" }] }));

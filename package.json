@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "mock": "node --no-warnings scripts/make-mock-scenario.mjs",
-    "fetch:osm": "node scripts/fetch-osm.mjs",
+    "fetch:osm": "node --no-warnings scripts/fetch-osm.mjs",
+    "fetch:elevation": "node --no-warnings scripts/fetch-elevation.mjs",
     "check:api": "node --no-warnings scripts/check-api.mjs"
   },
   "dependencies": {

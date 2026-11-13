@@ -616,6 +616,8 @@ export type PlanMode = z.infer<typeof PlanModeSchema>;
 export const PlanRequestSchema = z.object({
   text: z.string().min(1).max(20000),
   mode: PlanModeSchema,
+  /** Optional (additive): follow-up prompt; the plan being modified ("now make it every 8 minutes"). */
+  previousEdit: ScenarioEditSchema.optional(),
 });
 export type PlanRequest = z.infer<typeof PlanRequestSchema>;
 
@@ -638,6 +640,25 @@ export const SimulateRequestSchema = z.object({
 export type SimulateRequest = z.infer<typeof SimulateRequestSchema>;
 export const SimulateResponseSchema = ScenarioResultSchema;
 export type SimulateResponse = ScenarioResult;
+
+/**
+ * Optional (added in 1.1.0, additive): when the result is a stored file (prebaked sim run or the mock),
+ * /api/simulate returns this pointer instead of the multi-MB body (Vercel caps function responses at
+ * 4.5 MB). The client fetches `scenarioUrl` (a static file under public/) and stamps `source`,
+ * `mockSections` and `isMock` on it exactly as the route used to.
+ */
+export const SimulatePointerSchema = z.object({
+  source: ScenarioSourceSchema,
+  /** Static URL of the full ScenarioResult, e.g. "/scenarios/beltline-streetcar.sim.json". */
+  scenarioUrl: z.string(),
+  mockSections: z.array(z.string()).optional(),
+  isMock: z.boolean().optional(),
+  /** True when a stored sim run matched the requested edit (false for the placeholder mock). */
+  matched: z.boolean().optional(),
+});
+export type SimulatePointer = z.infer<typeof SimulatePointerSchema>;
+/** What POST /api/simulate can return: a full result (live sim) or a pointer to a stored one. */
+export const SimulateRouteResponseSchema = z.union([SimulatePointerSchema, ScenarioResultSchema]);
 
 export const ChatMessageSchema = z.object({
   role: z.enum(["user", "persona"]),

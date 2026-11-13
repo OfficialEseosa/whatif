@@ -1,108 +1,99 @@
+"use client";
+import { useEffect, useState } from "react";
 import type { Alternative, ClaimCheck, Verdict } from "@/lib/contract";
 import { formatValue } from "@/lib/format";
-import { MockTag } from "../MockTag";
+import { prefersReducedMotion } from "@/hooks/useReducedMotion";
 
-type MockFn = (key: string) => boolean;
+export const VERDICT_WORD = { good: "Good plan", mixed: "Mixed plan", poor: "Poor plan" } as const;
+export const VERDICT_GRADE = { good: "good", mixed: "fair", poor: "poor" } as const;
 
-const VERDICT_WORD = { good: "A good plan", mixed: "A mixed plan", poor: "A poor plan" } as const;
+/** Counts a number up from 0 over 600 ms (instant under reduced motion). */
+function CountUp({ value, unit }: { value: number; unit: string }) {
+  const [k, setK] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    if (prefersReducedMotion()) {
+      raf = requestAnimationFrame(() => setK(1));
+      return () => cancelAnimationFrame(raf);
+    }
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const p = Math.min(1, (now - t0) / 600);
+      setK(1 - Math.pow(1 - p, 3));
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+  return <>{formatValue(k >= 1 ? value : value * k, unit)}</>;
+}
 
-export function VerdictPane({
-  verdict,
-  claims,
-  onAlternative,
-  isMock,
-}: {
-  verdict: Verdict;
-  claims: ClaimCheck[];
-  onAlternative: (a: Alternative) => void;
-  isMock: MockFn;
-}) {
-  const textMock = isMock("verdict.headline") || isMock("verdict.summary") || isMock("verdict.label");
-  const grade = verdict.label === "good" ? "good" : verdict.label === "poor" ? "poor" : "fair";
+const GRADE_WORD = { good: "Good", fair: "Fair", poor: "Poor" } as const;
+
+/** The five tests: label left, value and grade right. */
+export function TestRows({ verdict }: { verdict: Verdict }) {
   return (
-    <div className="stack-md">
-      <div className={`stack-sm ${textMock ? "is-mock-section" : ""}`}>
-        <span className="row gap-sm">
-          <span className={`verdict-word grade-${grade}`}>{VERDICT_WORD[verdict.label]}</span>
-          <MockTag show={textMock} what="the verdict label, headline and summary" />
-        </span>
-        <p className="verdict-headline">{verdict.headline}</p>
-        <p className="muted small">{verdict.summary}</p>
-      </div>
-      {claims.length > 0 && <ClaimCheckList claims={claims} mock={isMock("claims")} />}
-      <div className="stack-sm">
-        <h3 className="eyebrow">Five tests</h3>
-        <table className="table">
-          <tbody>
-            {verdict.tests.map((t) => {
-              const valueMock = isMock(`verdict.tests.${t.key}`);
-              const gradeMock = valueMock || isMock("verdict.grades");
-              return (
-                <tr key={t.key} className={valueMock ? "is-mock-section" : undefined}>
-                  <td>
-                    {t.label}
-                    <div className="small muted">{t.sublabel}</div>
-                  </td>
-                  <td className="mono num">
-                    {formatValue(t.value, t.unit)}
-                    <MockTag show={valueMock} what={`the ${t.label.toLowerCase()} value`} />
-                  </td>
-                  <td className="num">
-                    <span className={`badge grade-${t.grade}`} title={gradeMock ? "Grade is a mock placeholder" : undefined}>
-                      {t.grade}
-                      {gradeMock ? "*" : ""}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {isMock("verdict.grades") && <p className="small muted">* grade is a mock placeholder, not computed from the value shown.</p>}
-      </div>
-      <div className={`stack-sm ${isMock("verdict.alternatives") ? "is-mock-section" : ""}`}>
-        <h3 className="eyebrow">
-          Three plans that score better <MockTag show={isMock("verdict.alternatives")} what="the alternative plans" />
-        </h3>
-        {verdict.alternatives.map((a) => (
-          <button key={a.id} className="card" onClick={() => onAlternative(a)} disabled={!a.edit} title={a.edit ? "Build this plan instead" : "No edit attached yet"}>
-            <strong>{a.title}</strong>
-            <span className="small muted">{a.detail}</span>
-            <span className="chips">
-              {a.highlights.map((h) => (
-                <span key={h} className="chip">
-                  {h}
-                </span>
-              ))}
-            </span>
-          </button>
+    <ul className="list tests">
+      {verdict.tests.map((t, i) => (
+        <li key={t.key} className="test" style={{ animationDelay: `${i * 60}ms` }}>
+          <span className="test-label">{t.label}</span>
+          <span className="test-value">
+            <CountUp value={t.value} unit={t.unit} />
+          </span>
+          <span className={`test-grade grade-text-${t.grade}`}>{GRADE_WORD[t.grade]}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+export function Alternatives({ alternatives, onAlternative }: { alternatives: Alternative[]; onAlternative: (a: Alternative) => void; mock?: boolean }) {
+  if (!alternatives.length) return <p className="muted">No alternatives.</p>;
+  return (
+    <div className="stack-sm">
+      <ul className="list stack-sm">
+        {alternatives.map((a) => (
+          <li key={a.id}>
+            <button className="item" onClick={() => onAlternative(a)} disabled={!a.edit} title={a.edit ? "Run this plan instead" : "No edit attached yet"}>
+              <span className="item-row">
+                <strong className="grow">{a.title}</strong>
+                {a.edit && <span className="item-go">Run this plan</span>}
+              </span>
+              <span className="item-detail">{a.detail}</span>
+              {a.highlights.length > 0 && <span className="item-meta num">{a.highlights.join("  ·  ")}</span>}
+            </button>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
 }
 
-export function ClaimCheckList({ claims, mock }: { claims: ClaimCheck[]; mock: boolean }) {
+const RATING_TONE: Record<ClaimCheck["rating"], "good" | "fair" | "poor"> = {
+  accurate: "good",
+  partly: "fair",
+  overstated: "poor",
+  understated: "poor",
+  unsupported: "poor",
+};
+
+export function ClaimCheckList({ claims }: { claims: ClaimCheck[]; mock?: boolean }) {
   return (
-    <div className={`stack-sm ${mock ? "is-mock-section" : ""}`}>
-      <h3 className="eyebrow">
-        What the article claims, and what the model measures <MockTag show={mock} what="the claim check" />
-      </h3>
-      <ul className="list stack-sm">
+    <div className="stack-md">
+      <ul className="list stack-md">
         {claims.map((c) => (
           <li key={c.id} className="claim">
-            <div className="row gap-sm">
-              <q className="grow">{c.quote}</q>
-              <span className={`badge rating-${c.rating}`}>{c.rating}</span>
+            <div className="item-row">
+              <q className="grow claim-quote">{c.quote}</q>
+              <span className={`grade grade-${RATING_TONE[c.rating]}`}>{c.rating}</span>
             </div>
             <dl className="claim-pair">
               <div>
-                <dt>Article</dt>
-                <dd className="mono">{c.claimed}</dd>
+                <dt>Article says</dt>
+                <dd className="num">{c.claimed}</dd>
               </div>
               <div>
-                <dt>Model</dt>
-                <dd className="mono">{c.measured}</dd>
+                <dt>Model shows</dt>
+                <dd className="num">{c.measured}</dd>
               </div>
             </dl>
           </li>

@@ -19,11 +19,6 @@ export function WhoPaysPane({
   return (
     <div className="stack-md">
       <ul className={`list stack-sm ${itemsMock ? "is-mock-section" : ""}`}>
-        {itemsMock && (
-          <li className="small muted">
-            <MockTag show what="the who-pays items" /> These items are mock placeholders, not simulation output.
-          </li>
-        )}
         {whoPays.items.map((i) => (
           <li key={i.key}>
             <button
