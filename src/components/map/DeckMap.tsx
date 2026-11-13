@@ -151,9 +151,7 @@ export default function DeckMap() {
     setIvs({
       ...next,
       position: [0, 0, threeD ? PHOTOREAL_TARGET_Z : 0],
-      // Always go through deck.gl's transition manager (even "instant" moves take 1 ms): an untransitioned
-      // initialViewState change left the controller's own state behind, so the next wheel/drag jumped back.
-      transitionDuration: Math.max(1, ms),
+      transitionDuration: ms,
       transitionInterpolator: new FlyToInterpolator(),
     });
   }, []);
