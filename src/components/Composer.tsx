@@ -2,10 +2,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useBuildFlow } from "@/hooks/useBuildFlow";
 import { detectMode, MODE_ACTION } from "@/lib/detectMode";
-import { DEFAULT_TEXT, useStore } from "@/lib/store";
-import { ArrowUpIcon, CloseIcon, PlusIcon } from "./icons";
+import type { PlanMode } from "@/lib/contract";
+import { DEFAULT_TEXT, selectActiveRun, useStore } from "@/lib/store";
+import { ArrowUpIcon, CloseIcon, EditIcon, PlusIcon } from "./icons";
 import { TimeScrubber } from "./TimeScrubber";
-import { focusComposer, newPlan, recordRun, restoreEntry, useUi } from "./uiStore";
+import { editEntry, focusComposer, loadSession, newPlan, persistSession, recordRun, restoreEntry, useUi, type SessionEntry } from "./uiStore";
 
 /** Example inputs: a couple of plans, a sample article, a problem. Clicking fills the box (never submits). */
 const EXAMPLES: { label: string; text: string }[] = [
@@ -45,14 +46,20 @@ export function Composer() {
     if (s.phase === "idle" && s.text === DEFAULT_TEXT.prompt) s.set({ text: "" });
   }, []);
 
-  // Each finished run joins the session thread.
-  useEffect(
-    () =>
-      useStore.subscribe((s, prev) => {
-        if (s.phase === "done" && prev.phase !== "done" && s.scenario && BUSY.has(prev.phase)) recordRun(s.scenario);
-      }),
-    [],
-  );
+  // Each finished run (simulated or only previewed) joins the session thread, kept in sessionStorage.
+  useEffect(() => {
+    loadSession();
+    const unPersist = persistSession();
+    const unRecord = useStore.subscribe((s, prev) => {
+      if (s.phase !== "done" || prev.phase === "done" || !BUSY.has(prev.phase)) return;
+      const run = selectActiveRun(s);
+      if (run) recordRun(run, s.scenario);
+    });
+    return () => {
+      unPersist();
+      unRecord();
+    };
+  }, []);
 
   // "/" focuses the box from anywhere that is not already a text field.
   useEffect(() => {
@@ -145,9 +152,12 @@ export function Composer() {
               submit();
             } else if (e.key === "Escape") {
               e.currentTarget.blur();
-            } else if (e.key === "ArrowUp" && !text && lastPrompt) {
+            } else if (e.key === "ArrowUp" && !text) {
+              // Recall the last prompt (or the newest in the session list after a refresh).
+              const recall = lastPrompt || [...useUi.getState().session].reverse().find((x) => x.mode !== "alternative")?.text;
+              if (!recall) return;
               e.preventDefault();
-              useStore.getState().set({ text: lastPrompt });
+              useStore.getState().set({ text: recall });
             }
           }}
         />
@@ -163,25 +173,27 @@ export function Composer() {
   );
 }
 
-/** Earlier plans in this session (click one to show it again) and New plan. */
+/** Earlier prompts in this session: click one to show its result again, or Edit to put its text back in the box. */
 function Breadcrumb() {
   const session = useUi((s) => s.session);
   const active = useUi((s) => s.activeEntry);
+  const build = useBuildFlow();
+  const rerun = (edit: SessionEntry["edit"], restore: { text: string; mode: PlanMode }) => build(edit, { restore });
   return (
     <div className="crumbs">
-      {session.length > 1 && (
+      {session.length > 0 && (
         <ol className="list crumb-list" aria-label="Earlier prompts">
           {session.map((e) => (
-            <li key={e.n}>
-              <button
-                className="crumb"
-                aria-pressed={e.n === active}
-                onClick={() => restoreEntry(e)}
-                title={e.text}
-              >
-                <i className={`dot grade-bg-${VERDICT_GRADE[e.verdict]}`} aria-hidden="true" />
-                <span className="crumb-text">{e.title}</span>
+            <li key={e.n} className="rp-crumb">
+              <button className="crumb" aria-pressed={e.n === active} onClick={() => restoreEntry(e, rerun)} title={`${e.text} (${e.title})`}>
+                <i className={e.verdict ? `dot grade-bg-${VERDICT_GRADE[e.verdict]}` : "dot rp-dot-plan"} aria-hidden="true" />
+                <span className="crumb-text">{e.text}</span>
               </button>
+              {e.mode !== "alternative" && (
+                <button className="rp-crumb-edit" aria-label={`Edit: ${e.text}`} title="Edit this prompt" onClick={() => editEntry(e)}>
+                  <EditIcon />
+                </button>
+              )}
             </li>
           ))}
         </ol>

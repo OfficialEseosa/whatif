@@ -80,6 +80,11 @@ export function RunPanel() {
           <span className={`rp-node is-${state === "done" ? "end" : state === "error" ? "error" : "active"}`} aria-hidden="true" />
           <span className="rp-bar-text">
             <span className="rp-bar-title">{title}</span>
+            {run.prompt && (
+              <span className="rp-bar-prompt" title={run.prompt.text}>
+                “{run.prompt.text}”
+              </span>
+            )}
             <span className="rp-bar-sub">
               {sub}
               {src && <span className={src === "mock" ? "rp-amber" : undefined}>, {SOURCE_WORDS[src]}</span>}
@@ -99,6 +104,7 @@ export function RunPanel() {
         <header className="rp-head">
           <div className="rp-head-text">
             <h2 className="rp-title">{title}</h2>
+            {run.prompt && <PromptQuote key={run.id} text={run.prompt.text} />}
             <p className={`rp-sub${failed ? " is-error" : ""}`}>
               {sub}
             </p>
@@ -213,6 +219,7 @@ function StepLine({ step, run, elapsed, onRetry }: { step: PipelineStep; run: Ru
           {e && <p className="rp-line">{planLine(e)}</p>}
           {run.planSource === "mock_parser" && <p className="rp-line rp-amber">Sample plan — AI parser not connected</p>}
           {run.planSource === "alternative" && <p className="rp-line">From a suggested plan</p>}
+          {run.planSource === "restored" && <p className="rp-line">Restored from earlier in this session</p>}
         </>
       );
     case "stops":
@@ -285,3 +292,19 @@ const DrawProgress = memo(function DrawProgress() {
     </div>
   );
 });
+
+/** What the user typed, quoted under the plan name: up to 3 lines, expandable for long text. */
+function PromptQuote({ text }: { text: string }) {
+  const [all, setAll] = useState(false);
+  const long = text.length > 140 || text.split("\n").length > 3;
+  return (
+    <div className="rp-prompt">
+      <p className={`rp-prompt-text${all || !long ? "" : " is-clamped"}`}>“{text.trim()}”</p>
+      {long && (
+        <button className="rp-more" onClick={() => setAll(!all)} aria-expanded={all}>
+          {all ? "Show less" : "Show all"}
+        </button>
+      )}
+    </div>
+  );
+}

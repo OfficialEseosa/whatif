@@ -43,8 +43,10 @@ export type RunRecord = {
   overrideEdit: ScenarioEdit | null;
   /** Follow-up prompt: the plan this run modifies (sent to /api/plan as previousEdit). */
   previousEdit: ScenarioEdit | null;
-  /** Who produced the edit: the Claude parser, the canned mock parser, or a stored alternative. */
-  planSource: "claude" | "mock_parser" | "alternative" | null;
+  /** What the user typed for this run (null when it ran a suggested alternative). */
+  prompt: { text: string; mode: PlanMode } | null;
+  /** Who produced the edit: the Claude parser, the canned mock parser, a suggested alternative, or an earlier run being restored. */
+  planSource: "claude" | "mock_parser" | "alternative" | "restored" | null;
   edit: ScenarioEdit | null;
   claims: ExtractedClaim[] | null;
   /** checkEditAgainstGazetteer problems for the placed stops. */

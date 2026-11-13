@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { gazetteer } from "@/lib/ai/mock";
 import { checkEditAgainstGazetteer, type LngLat, type Network, type ScenarioEdit, type ScenarioResult } from "@/lib/contract";
 import { useStore, type PipelineStep, type RunRecord } from "@/lib/store";
+import type { PlanMode } from "@/lib/contract";
 import { prefersReducedMotion } from "./useReducedMotion";
 
 export const RUN_STEPS: PipelineStep[] = [
@@ -103,6 +104,8 @@ export function cancelRun() {
 export type BuildOptions = {
   /** Follow-up prompt: the plan being modified; passed to /api/plan. */
   previousEdit?: ScenarioEdit;
+  /** Re-running an earlier session entry from its stored edit: the prompt it came from. */
+  restore?: { text: string; mode: PlanMode };
 };
 
 /**
@@ -124,6 +127,7 @@ export function useBuildFlow() {
       steps: RUN_STEPS.map((p) => ({ ...p })),
       overrideEdit: overrideEdit ?? null,
       previousEdit,
+      prompt: opts?.restore ?? (overrideEdit ? null : { text: s.text.trim(), mode: s.inputMode }),
       planSource: null,
       edit: null,
       claims: null,
@@ -152,7 +156,7 @@ export function useBuildFlow() {
         ? { edit: overrideEdit, claims: undefined, isMock: false }
         : await api.plan({ text: s.text, mode: s.inputMode, ...(previousEdit ? { previousEdit } : {}) });
       if (!live()) return;
-      patch({ edit: plan.edit, claims: plan.claims ?? null, planSource: overrideEdit ? "alternative" : plan.isMock ? "mock_parser" : "claude" });
+      patch({ edit: plan.edit, claims: plan.claims ?? null, planSource: opts?.restore ? "restored" : overrideEdit ? "alternative" : plan.isMock ? "mock_parser" : "claude" });
       finish("plan", !overrideEdit && plan.isMock ? "warn" : "done");
 
       // 2. Place stops: a local gazetteer lookup, so it finishes immediately.
