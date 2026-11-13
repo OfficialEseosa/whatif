@@ -50,6 +50,11 @@ export function ResultsPanel() {
 function Card() {
   const scenario = useStore((s) => s.scenario)!;
   const highlightZone = useStore((s) => s.highlightZone);
+  // Claude's plain summary of this result, once it has arrived; the simulator's own headline until then.
+  const insight = useStore((s) => {
+    const run = selectActiveRun(s);
+    return run && run.result === s.scenario ? run.insight : null;
+  });
   const chatOpen = useStore((s) => s.chat !== null);
   const bbox = useStore((s) => s.network?.bbox);
   const details = useUi((s) => s.details);
@@ -95,8 +100,8 @@ function Card() {
           <CloseIcon />
         </button>
       </header>
-      <p className="verdict-headline">{v.headline}</p>
-      {reason && <p className="verdict-reason">{reason}</p>}
+      <p className="verdict-headline">{insight?.summary ?? v.headline}</p>
+      {!insight && reason && <p className="verdict-reason">{reason}</p>}
 
       <div className="results-tests">
         <TestRows verdict={v} />

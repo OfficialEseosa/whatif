@@ -1,6 +1,6 @@
 "use client";
 /** Details shown when a stop on the run line is expanded. Only values the app actually has. */
-import { useState, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import { gazetteer } from "@/lib/ai/mock";
 import type { GazetteerKind, VerdictTestKey, ZoneKind } from "@/lib/contract";
 import { pct1 } from "@/lib/format";
@@ -26,35 +26,12 @@ const KIND_LABEL: Record<GazetteerKind, string> = {
 const TEST_ZONE: Partial<Record<VerdictTestKey, ZoneKind>> = { renters_rent_pressure: "rent_pressure" };
 
 export function PlanBody({ run }: { run: RunRecord }) {
-  const [all, setAll] = useState(false);
-  const e = run.edit;
-  if (!e) return null;
-  const notes = e.assumptions ?? [];
-  const shown = all ? notes : notes.slice(0, 3);
+  if (!run.claims?.length) return null;
   return (
-    <>
-      {notes.length > 0 && (
-        <div className="rp-quotes">
-          <span className="rp-label">What we assumed</span>
-          {shown.map((a, i) => (
-            <p key={i} className="rp-quote">
-              {a}
-            </p>
-          ))}
-          {notes.length > 3 && (
-            <button className="rp-more" onClick={() => setAll(!all)}>
-              {all ? "Show fewer" : `${notes.length - 3} more`}
-            </button>
-          )}
-        </div>
-      )}
-      {!!run.claims?.length && (
-        <div className="rp-quotes">
-          <span className="rp-label">{run.claims.length} claims found in the article</span>
-          <p className="rp-quote">“{run.claims[0].quote}”</p>
-        </div>
-      )}
-    </>
+    <div className="rp-quotes">
+      <span className="rp-label">{run.claims.length} claims found in the article</span>
+      <p className="rp-quote">“{run.claims[0].quote}”</p>
+    </div>
   );
 }
 

@@ -40,7 +40,7 @@ import {
   type TransitTech,
 } from "@/lib/contract";
 import { findPlaceMatches, loadGazetteer, preclean, toStop, tokenize } from "./gazetteer";
-import { findRailLineMentions, findRoadIdsByName, findRoadMentions, getRailLine, isRailLineId, isRoadId, loadNetwork } from "./network";
+import { findRailLineMentions, findRoadIdsByName, findRoadMentions, getRailLine, isRailLineId, loadNetwork } from "./network";
 // Article-analyst's deterministic extractor (read-only dependency; never edited here).
 import { extractClaimsDeterministic } from "@/lib/ai/article/extractClaims";
 
@@ -63,13 +63,14 @@ export interface PlanHints {
   tech?: TransitTech;
   stopIds?: string[];
   roadNames?: string[];
-  roadIds?: string[];
   baseLineId?: string;
   headwayMin?: number;
   lanesRemoved?: number;
   chargeUsd?: number;
   name?: string;
   notes?: string[];
+  /** The text changes the plan already on screen rather than describing a new one. */
+  changesPrevious?: boolean;
 }
 
 export interface FallbackOptions {
@@ -415,7 +416,7 @@ export function fallbackEdit(text: string, opts: FallbackOptions = {}): Scenario
     const mentions = findRoadMentions(text, network, placeTokens);
     for (const m of mentions) for (let i = m.start; i < m.end; i++) covered.add(i);
     const hinted = (hints?.roadNames ?? []).map((name) => ({ name, ids: findRoadIdsByName(name, network) })).filter((r) => r.ids.length > 0);
-    const hintIds = [...(hints?.roadIds ?? []).filter((id) => isRoadId(id, network)), ...hinted.flatMap((r) => r.ids)];
+    const hintIds = hinted.flatMap((r) => r.ids);
     const ids = [...new Set(hintIds.length > 0 ? hintIds : mentions.flatMap((m) => m.roadIds))];
     roadNames = hintIds.length > 0 ? hinted.map((r) => r.name) : mentions.map((m) => m.displayName);
     if (ids.length > 0) roadIds = ids;

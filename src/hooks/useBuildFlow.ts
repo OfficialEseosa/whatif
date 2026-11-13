@@ -137,6 +137,7 @@ export function useBuildFlow() {
       routeMs: null,
       file: null,
       result: null,
+      insight: null,
       notSimulated: false,
       notSimulatedReason: null,
       error: null,
@@ -192,6 +193,8 @@ export function useBuildFlow() {
         return;
       }
       finish("route", result.source === "mock" || result.isMock ? "warn" : "done");
+      // Claude's plain summary and follow-ups arrive on their own; nothing waits for them.
+      if (!result.isMock) void api.explain(result).then((insight) => insight && patch({ insight }));
 
       // 5. Score stakes: computed by the simulation in the same result; recorded as its own step.
       current = "score";

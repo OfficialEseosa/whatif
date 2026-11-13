@@ -60,6 +60,8 @@ export type RunRecord = {
   /** Set when the route pointed at a stored file and the client fetched it. */
   file: { url: string; ms: number; bytes: number } | null;
   result: ScenarioResult | null;
+  /** Claude's reading of the result: a plain summary and follow-ups to try. Null until it arrives, or if it never does. */
+  insight: { summary: string; followUps: string[] } | null;
   /** The server has no simulation for this edit: the run stops after Route commuters, nothing is scored. */
   notSimulated: boolean;
   /** Why: the simulator can't run this kind of plan ("unsupported", with its message) or none is online ("offline"). */

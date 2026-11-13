@@ -1,10 +1,10 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useBuildFlow } from "@/hooks/useBuildFlow";
 import { detectMode, MODE_ACTION } from "@/lib/detectMode";
-import type { PlanMode } from "@/lib/contract";
+import type { PlanMode, ScenarioEdit } from "@/lib/contract";
 import { DEFAULT_TEXT, selectActiveRun, useStore } from "@/lib/store";
-import { ArrowUpIcon, CloseIcon, EditIcon, PlusIcon } from "./icons";
+import { ArrowUpIcon, ChevronDownIcon, CloseIcon, EditIcon, PlusIcon } from "./icons";
 import { TimeScrubber } from "./TimeScrubber";
 import "./firstrun.css";
 import { editEntry, focusComposer, loadSession, newPlan, persistSession, recordRun, restoreEntry, useUi, type SessionEntry } from "./uiStore";
@@ -19,6 +19,7 @@ const EXAMPLES: { label: string; text: string }[] = [
 
 const BUSY = new Set(["planning", "simulating", "building"]);
 const VERDICT_GRADE = { good: "good", mixed: "fair", poor: "poor" } as const;
+const VERDICT_WORD = { good: "Good plan", mixed: "Mixed plan", poor: "Poor plan" } as const;
 
 /** Bottom-centre prompt: one box for a plan, a pasted article, or a problem to fix. */
 export function Composer() {
@@ -74,9 +75,10 @@ export function Composer() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const submit = () => {
-    const value = text.trim();
+  const submit = (typed: string = text) => {
+    const value = typed.trim();
     if (!value || busy) return;
+    if (value !== text) useStore.getState().set({ text: value });
     const m = detectMode(value);
     const s = useStore.getState();
     s.set({ inputMode: m });
@@ -108,7 +110,8 @@ export function Composer() {
         </p>
       )}
 
-      {hasSession && !busy && <Breadcrumb />}
+      {!busy && (hasSession || hasRun) && <PlanBar />}
+      {!busy && built && <FollowUps onPick={submit} />}
 
       {firstRun && (
         <div className="surface fr-intro">
@@ -149,8 +152,8 @@ export function Composer() {
           id="composer-input"
           ref={ref}
           className="composer-input"
-          aria-label={built ? "Change the plan" : "Describe a transit plan, paste an article, or name a problem"}
-          placeholder={built ? "Change this plan, for example: add a stop at Krog Street" : "Try: extend the streetcar to Ponce City Market"}
+          aria-label={built ? "Ask for a change to this plan, or describe a new one" : "Describe a transit plan, paste an article, or name a problem"}
+          placeholder={built ? "Ask for a change, or describe a new plan" : "Try: extend the streetcar to Ponce City Market"}
           rows={1}
           value={text}
           readOnly={busy}
@@ -176,7 +179,7 @@ export function Composer() {
               <span className="spinner" aria-hidden="true" />
             ) : (
               <>
-                {built ? "Update" : "Simulate"}
+                Simulate
                 <ArrowUpIcon />
               </>
             )}
@@ -189,35 +192,123 @@ export function Composer() {
   );
 }
 
-/** Earlier prompts in this session: click one to show its result again, or Edit to put its text back in the box. */
-function Breadcrumb() {
+/** Follow-ups to offer when Claude's have not arrived: changes every plan of that kind can take. */
+function defaultFollowUps(edit: ScenarioEdit): string[] {
+  const often = edit.headwayMin === 5 ? "Run it every 10 minutes" : "Run it every 5 minutes";
+  if (edit.type === "brt_lane") return [often, edit.lanesRemoved === 0 ? "Take one car lane" : "Keep all car lanes", "Make it a streetcar instead"];
+  if (edit.type === "new_bus_route") return [often, "Give it its own bus lane", "Make it a streetcar instead"];
+  if (edit.type === "new_rail_line" || edit.type === "extend_line") return [often, "Make it a bus lane instead"];
+  return [];
+}
+
+/** Up to three one-click changes to the plan on screen. Claude writes them from the results; clicking one runs it. */
+function FollowUps({ onPick }: { onPick: (text: string) => void }) {
+  const edit = useStore((s) => s.scenario?.edit);
+  const insight = useStore((s) => {
+    const run = selectActiveRun(s);
+    return run && run.result === s.scenario ? run.insight : null;
+  });
+  if (!edit) return null;
+  const items = (insight?.followUps.length ? insight.followUps : defaultFollowUps(edit)).slice(0, 3);
+  if (!items.length) return null;
+  return (
+    <ul className="list followups" aria-label="Changes to try">
+      {items.map((f) => (
+        <li key={f}>
+          <button type="button" className="example" onClick={() => onPick(f)} title="Run this change">
+            {f}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Above the box: which plan a follow-up changes, the earlier plans of this session, and a way to start over. */
+function PlanBar() {
   const session = useUi((s) => s.session);
   const active = useUi((s) => s.activeEntry);
+  const title = useStore((s) => s.scenario?.title ?? selectActiveRun(s)?.edit?.name ?? null);
   const build = useBuildFlow();
+  const [open, setOpen] = useState(false);
+  const menu = useRef<HTMLDivElement>(null);
   const rerun = (edit: SessionEntry["edit"], restore: { text: string; mode: PlanMode }) => build(edit, { restore });
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => !menu.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("pointerdown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   return (
     <div className="crumbs">
-      {session.length > 0 && (
-        <ol className="list crumb-list" aria-label="Earlier prompts">
-          {session.map((e) => (
-            <li key={e.n} className="rp-crumb">
-              <button className="crumb" aria-pressed={e.n === active} onClick={() => restoreEntry(e, rerun)} title={`${e.text} (${e.title})`}>
-                <i className={e.verdict ? `dot grade-bg-${VERDICT_GRADE[e.verdict]}` : "dot rp-dot-plan"} aria-hidden="true" />
-                <span className="crumb-text">{e.text}</span>
-              </button>
-              {e.mode !== "alternative" && (
-                <button className="rp-crumb-edit" aria-label={`Edit: ${e.text}`} title="Edit this prompt" onClick={() => editEntry(e)}>
-                  <EditIcon />
-                </button>
-              )}
-            </li>
-          ))}
-        </ol>
+      {title && (
+        <p className="surface fu-context" title={title}>
+          <span className="fu-label">Follow up on</span>
+          <span className="fu-title">{title}</span>
+        </p>
       )}
-      <button className="btn" onClick={newPlan}>
-        <PlusIcon />
-        New plan
-      </button>
+      <div className="fu-actions">
+        {session.length > 0 && (
+          <div className="fu-menu" ref={menu}>
+            <button className="btn" aria-expanded={open} aria-haspopup="true" onClick={() => setOpen(!open)}>
+              Earlier plans
+              <span className="fu-count">{session.length}</span>
+              <ChevronDownIcon />
+            </button>
+            {open && (
+              <ol className="surface list fu-list" aria-label="Earlier plans">
+                {[...session].reverse().map((e) => (
+                  <li key={e.n} className="fu-row">
+                    <button
+                      className="fu-entry"
+                      aria-current={e.n === active}
+                      onClick={() => {
+                        setOpen(false);
+                        restoreEntry(e, rerun);
+                      }}
+                    >
+                      <i className={e.verdict ? `dot grade-bg-${VERDICT_GRADE[e.verdict]}` : "dot rp-dot-plan"} aria-hidden="true" />
+                      <span className="fu-entry-text">
+                        <span className="fu-entry-title">{e.title}</span>
+                        <span className="fu-entry-prompt">
+                          {e.verdict ? VERDICT_WORD[e.verdict] : "Not tested"}
+                          {e.mode !== "alternative" && e.text !== e.title ? `, you asked: ${e.text}` : ""}
+                        </span>
+                      </span>
+                    </button>
+                    {e.mode !== "alternative" && (
+                      <button
+                        className="fu-edit"
+                        aria-label={`Put this back in the box: ${e.text}`}
+                        title="Put this prompt back in the box"
+                        onClick={() => {
+                          setOpen(false);
+                          editEntry(e);
+                        }}
+                      >
+                        <EditIcon />
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        )}
+        {title && (
+          <button className="btn" onClick={newPlan}>
+            <PlusIcon />
+            New plan
+          </button>
+        )}
+      </div>
     </div>
   );
 }

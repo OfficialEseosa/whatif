@@ -273,7 +273,29 @@ textarea, input { caret-color: var(--accent); }
 .example:hover { background: var(--paper-3); border-color: #3a3c42; }
 
 .crumbs { display: flex; align-items: center; gap: 8px; }
-.crumbs .btn { margin-left: auto; box-shadow: var(--shadow-hard); }
+.crumbs .btn { box-shadow: var(--shadow-hard); }
+.fu-context { display: flex; align-items: baseline; gap: 8px; min-width: 0; height: 36px; padding: 0 12px; line-height: 34px; font-size: 14px; border-radius: var(--radius-sm); box-shadow: var(--shadow-hard); }
+.fu-label { flex: none; color: var(--ink-3); }
+.fu-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--ink); }
+.fu-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
+.fu-menu { position: relative; }
+.fu-menu .btn svg { transition: transform var(--t-fast) var(--ease); }
+.fu-menu .btn[aria-expanded="true"] svg { transform: rotate(180deg); }
+.fu-count { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.fu-list { position: absolute; z-index: 8; right: 0; bottom: calc(100% + 8px); width: min(420px, calc(100vw - 2 * var(--gut))); max-height: min(360px, 50vh); overflow-y: auto; padding: 6px; box-shadow: var(--shadow-lift); animation: rise 150ms var(--ease) both; }
+.fu-row { display: flex; align-items: stretch; border-radius: var(--radius-sm); }
+.fu-row:hover { background: var(--paper-2); }
+.fu-entry { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; text-align: left; border-radius: var(--radius-sm); }
+.fu-entry .dot { flex: none; margin-top: 7px; }
+.fu-entry[aria-current="true"] .fu-entry-title { color: var(--accent); }
+.fu-entry-text { display: flex; flex-direction: column; min-width: 0; }
+.fu-entry-title { font-size: 15px; line-height: 21px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fu-entry-prompt { font-size: 13px; line-height: 18px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fu-edit { flex: none; display: grid; place-items: center; width: 40px; color: var(--ink-3); border-radius: var(--radius-sm); }
+.fu-edit:hover { color: var(--ink); }
+.followups { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; animation: rise 150ms var(--ease) both; }
+.followups::-webkit-scrollbar { display: none; }
+.followups li { flex: none; }
 .crumb-list { display: flex; gap: 8px; min-width: 0; overflow: hidden; }
 .crumb { display: inline-flex; align-items: center; gap: 8px; height: 36px; max-width: 200px; padding: 0 12px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 500; color: var(--ink-2); background: var(--paper); border: 1px solid var(--rule); box-shadow: var(--shadow-hard); }
 .crumb:hover { color: var(--ink); }

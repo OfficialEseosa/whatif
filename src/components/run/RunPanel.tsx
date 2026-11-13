@@ -158,7 +158,7 @@ function detailFor(p: PipelineStep, run: RunRecord): ReactNode | null {
   const e = run.edit;
   switch (p.id) {
     case "plan":
-      return e && (e.assumptions?.length || run.claims?.length) ? <PlanBody run={run} /> : null;
+      return run.claims?.length ? <PlanBody run={run} /> : null;
     case "stops":
       return e?.stops.length ? <StopsBody run={run} /> : null;
     case "edit":

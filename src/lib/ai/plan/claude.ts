@@ -4,14 +4,13 @@
  * coordinate comes from the gazetteer and the network, never from the model.
  * Returns null (caller keeps the keyword rules) when there is no key or the call fails.
  */
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { EditTypeSchema, TransitTechSchema, type PlanRequest } from "@/lib/contract";
+import { CLAUDE_MODEL, claudeClient } from "../client";
 import type { PlanHints } from "./fallback";
 import { loadGazetteer } from "./gazetteer";
 import { loadNetwork } from "./network";
 
-const DEFAULT_MODEL = "claude-haiku-5-5";
 const TIMEOUT_MS = 12_000;
 const MAX_TEXT_CHARS = 8000;
 
@@ -20,7 +19,7 @@ const HintsSchema = z.object({
   tech: TransitTechSchema.nullish(),
   stopIds: z.array(z.string()).default([]),
   roadNames: z.array(z.string()).default([]),
-  keepPreviousRoads: z.boolean().nullish(),
+  changesPrevious: z.boolean().nullish(),
   baseLineId: z.string().nullish(),
   headwayMin: z.number().positive().nullish(),
   lanesRemoved: z.number().int().min(0).nullish(),
@@ -39,7 +38,7 @@ const TOOL = {
       tech: { type: "string", enum: TransitTechSchema.options, description: "Vehicle for transit plans. Omit for road-only plans." },
       stopIds: { type: "array", items: { type: "string" }, description: "Place ids from PLACES, in order along the route. Empty for road-only plans." },
       roadNames: { type: "array", items: { type: "string" }, description: "Street names copied exactly from ROADS, only for streets the user named." },
-      keepPreviousRoads: { type: "boolean", description: "True when the text changes PREVIOUS PLAN and its streets stay the same." },
+      changesPrevious: { type: "boolean", description: "True when the text asks for a change to PREVIOUS PLAN. False when it describes a new plan or there is no previous plan." },
       baseLineId: { type: "string", description: "Id from LINES, for extend_line and change_frequency." },
       headwayMin: { type: "number", description: "Minutes between vehicles, only if the user gave it." },
       lanesRemoved: { type: "integer", description: "Car lanes removed per direction for brt_lane, only if the user gave it." },
@@ -71,11 +70,13 @@ Plan types:
 Rules:
 - Work out what people mean. Resolve abbreviations, nicknames and misspellings to PLACES ("GSU" is Georgia State, "GT" is Georgia Tech, "PCM" is Ponce City Market).
 - stopIds must be ids from PLACES, in the order the route runs. Never invent an id. If a named place is not in PLACES, leave it out and say so in notes.
-- Prefer a station or stop over a landmark with the same name when the user is describing a transit line.
+- Any place in PLACES can be a stop, whatever its kind: a landmark, a neighborhood or a station. When asked to add a stop at one, add it in route order.
+- When two places share a name, prefer the station.
 - roadNames only when the user named a street, copied exactly from ROADS.
 - For a lane, closure or new road on a named street, leave stopIds empty unless the user also named places.
 - "bus lane" or "BRT" means brt_lane with tech brt. A plain "bus" between places means new_bus_route with tech bus.
-- If PREVIOUS PLAN is given and the text changes it ("make it every 8 minutes", "add a stop at Krog Street"), return the whole updated plan. Otherwise ignore it.
+- If PREVIOUS PLAN is given and the text changes it ("make it every 8 minutes", "add a stop at Krog Street", "make it a streetcar instead"), set changesPrevious and return the whole updated plan: keep its stops and numbers and change only what was asked. A new vehicle changes the type to match (rail vehicles are new_rail_line, a plain bus is new_bus_route, a bus lane is brt_lane). Otherwise ignore PREVIOUS PLAN.
+- change_frequency is only for a line that already exists in LINES. Running a proposed line more often keeps the proposed line's type and sets headwayMin.
 - If the text is a news article, read the main project it proposes.
 - MARTA colour names: the Red and Gold lines are marta_north; the Blue and Green lines are marta_east_west.
 - Always answer with the submit_plan tool.`;
@@ -92,16 +93,15 @@ function referenceText(): string {
 }
 
 export async function readPlanWithClaude(req: PlanRequest): Promise<PlanHints | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return null;
+  const client = claudeClient(TIMEOUT_MS);
+  if (!client) return null;
   const prev = req.previousEdit;
   const previous = prev
     ? `\n\nPREVIOUS PLAN:\n${JSON.stringify({ type: prev.type, tech: prev.tech, name: prev.name, stopIds: prev.stops.map((s) => s.gazetteerId), baseLineId: prev.baseLineId, headwayMin: prev.headwayMin, lanesRemoved: prev.lanesRemoved, chargeUsd: prev.chargeUsd, streets: prev.roadIds?.length ?? 0 })}`
     : "";
   try {
-    const client = new Anthropic({ apiKey, timeout: TIMEOUT_MS, maxRetries: 0 });
     const msg = await client.messages.create({
-      model: process.env.ANTHROPIC_MODEL || DEFAULT_MODEL,
+      model: CLAUDE_MODEL,
       max_tokens: 1024,
       system: [{ type: "text", text: `${SYSTEM}\n\n${referenceText()}`, cache_control: { type: "ephemeral" } }],
       tools: [TOOL],
@@ -115,13 +115,22 @@ export async function readPlanWithClaude(req: PlanRequest): Promise<PlanHints | 
       return null;
     }
     const h = parsed.data;
+    // A proposed line run more often is still that proposed line, not a change to an existing one.
+    const keepsType = h.type === "change_frequency" && prev && prev.type !== "change_frequency" && !prev.baseLineId;
+    let type = keepsType ? prev.type : h.type;
+    // The vehicle decides between the three "new line" types when the two disagree.
+    if (type === "brt_lane" || type === "new_bus_route" || type === "new_rail_line") {
+      if (h.tech === "streetcar" || h.tech === "light_rail" || h.tech === "heavy_rail") type = "new_rail_line";
+      else if (h.tech === "brt") type = "brt_lane";
+      else if (h.tech === "bus") type = "new_bus_route";
+    }
     return {
-      type: h.type,
+      type,
+      changesPrevious: !!prev && !!h.changesPrevious,
       tech: h.tech ?? undefined,
       stopIds: h.stopIds,
       roadNames: h.roadNames,
-      roadIds: h.keepPreviousRoads ? prev?.roadIds : undefined,
-      baseLineId: h.baseLineId ?? undefined,
+      baseLineId: keepsType ? undefined : (h.baseLineId ?? undefined),
       headwayMin: h.headwayMin ?? undefined,
       lanesRemoved: h.lanesRemoved ?? undefined,
       chargeUsd: h.chargeUsd ?? undefined,

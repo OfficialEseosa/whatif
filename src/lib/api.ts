@@ -104,7 +104,27 @@ async function simulate(
   return { result: parsed.data, source, timing: { routeMs, file: null } };
 }
 
+/** What Claude made of a finished run. Null on any failure: the results card then keeps the simulator's own headline. */
+export type Insight = { summary: string; followUps: string[] };
+async function explain(result: ScenarioResult): Promise<Insight | null> {
+  const e = result.edit;
+  const body = {
+    plan: { name: e.name, type: e.type, tech: e.tech, stops: e.stops.map((s) => s.name), headwayMin: e.headwayMin, lanesRemoved: e.lanesRemoved, stations: result.line.stops.length },
+    verdict: { label: result.verdict.label, summary: result.verdict.summary, tests: result.verdict.tests },
+    metrics: result.metrics,
+  };
+  try {
+    const res = await fetch("/api/explain", post(body));
+    const insight = res.ok ? (await res.json())?.insight : null;
+    const ok = insight && typeof insight.summary === "string" && Array.isArray(insight.followUps) && insight.followUps.every((f: unknown) => typeof f === "string");
+    return ok ? insight : null;
+  } catch {
+    return null;
+  }
+}
+
 export const api = {
+  explain,
   plan: (req: PlanRequest) => call("/api/plan", PlanResponseSchema, post(req)),
   simulate: (req: SimulateRequest) => simulate(req).then((r) => r.result),
   /** Like simulate, plus where the time went; `result` is null when there is no simulation for the edit. */
