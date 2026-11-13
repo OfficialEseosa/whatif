@@ -14,9 +14,9 @@ export function PersonaChat({ personas }: { personas: Persona[] }) {
   return (
     <div className="chat stack-sm">
       <div className="row">
-        <strong className="grow">Chat with {persona.name}</strong>
+        <strong className="grow">Ask {persona.name}</strong>
         <button className="btn" onClick={close}>
-          Close
+          Back to residents
         </button>
       </div>
       <ul className="list chat-log stack-sm" aria-live="polite">
@@ -26,7 +26,7 @@ export function PersonaChat({ personas }: { personas: Persona[] }) {
             {m.content}
           </li>
         ))}
-        {chat.pending && <li className="msg msg-persona muted">…</li>}
+        {chat.pending && <li className="msg msg-persona muted">{persona.name.split(" ")[0]} is typing</li>}
       </ul>
       <form
         className="row gap-sm"
@@ -36,9 +36,9 @@ export function PersonaChat({ personas }: { personas: Persona[] }) {
           setDraft("");
         }}
       >
-        <input className="input grow" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Ask a question" aria-label="Message" />
+        <input className="input grow" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Ask about the plan" aria-label={`Your question for ${persona.name}`} />
         <button className="btn btn-primary" type="submit" disabled={!draft.trim() || chat.pending}>
-          Send
+          Ask
         </button>
       </form>
     </div>

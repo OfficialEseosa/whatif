@@ -1,0 +1,18 @@
+/* First-run guidance: intro above the prompt, labelled submit button, map key. Tokens come from globals.css. */
+.fr-intro { display: grid; gap: 2px; padding: 12px 20px; animation: rise 150ms var(--ease) both; }
+.fr-title { font-family: var(--font-display); font-size: 20px; line-height: 26px; font-weight: 600; }
+.fr-lead { font-size: 15px; line-height: 22px; color: var(--ink-2); }
+.fr-try { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fr-try-label { flex: none; padding: 0 10px; height: 36px; display: inline-flex; align-items: center; border-radius: var(--radius-sm); background: var(--paper); border: 1px solid var(--rule); font-size: 14px; color: var(--ink-2); white-space: nowrap; }
+.fr-try .examples { flex: 1; min-width: 0; justify-content: flex-start; flex-wrap: wrap; }
+.btn-run.fr-run { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: auto; min-width: 44px; padding: 0 14px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.btn-run.fr-run svg { width: 18px; height: 18px; }
+.fr-error-next { color: var(--ink-2); }
+
+.map-key { display: grid; gap: 6px; padding-top: 12px; border-top: 1px solid var(--rule-soft); }
+.map-key-title { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.map-key-list { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; }
+.map-key-item { display: flex; align-items: center; gap: 8px; font-size: 13px; line-height: 18px; color: var(--ink); white-space: nowrap; }
+.map-key-swatch { flex: none; width: 18px; display: grid; place-items: center; }
+.map-key-line { width: 18px; height: 3px; border-radius: 1px; }
+.map-key-dot { width: 7px; height: 7px; border-radius: 50%; }

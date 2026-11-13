@@ -11,7 +11,7 @@ import { selectActiveRun, useStore, type PipelineStep, type RunRecord } from "@/
 import { ChevronDownIcon } from "../icons";
 import { focusComposer } from "../uiStore";
 import { EditBody, PlanBody, RouteBody, ScoreBody, StopsBody } from "./StepBodies";
-import { SOURCE_WORDS, editLine, fmtDur, notSimulatedText, planLine, routeLine, scoreLine, sourceKind } from "./runFormat";
+import { SOURCE_WORDS, editLine, fmtDur, notSimulatedText, planLine, routeLine, scoreLine, sourceKind, stepLabel } from "./runFormat";
 import "./run.css";
 
 /** How long a finished run stays open before it folds into the bar. */
@@ -65,18 +65,18 @@ export function RunPanel() {
   const sub = failed
     ? run.cancelled
       ? "Cancelled"
-      : `Stopped at ${failed.label.toLowerCase()}`
+      : `Stopped while ${stepLabel(failed).toLowerCase()}`
     : running
-      ? `Building, ${fmtDur(total, true)}`
+      ? `Step ${Math.min(steps.length, steps.filter(isDone).length + 1)} of ${steps.length}, ${fmtDur(total, true)}`
       : run.notSimulated
-        ? "Not simulated"
-        : `Built in ${fmtDur(total) || "0.0 s"}`;
+        ? "Could not be tested"
+        : `Done in ${fmtDur(total) || "0.0 s"}`;
   const state = failed ? "error" : running ? "running" : "done";
 
   if (isFolded)
     return (
       <div className="rp">
-        <button className="rp-bar" onClick={() => fold(false)} aria-expanded={false} aria-label={`${title}. ${sub}. Show the build steps`}>
+        <button className="rp-bar" onClick={() => fold(false)} aria-expanded={false} aria-label={`${title}. ${sub}. Show the steps`}>
           <span className={`rp-node is-${state === "done" ? "end" : state === "error" ? "error" : "active"}`} aria-hidden="true" />
           <span className="rp-bar-text">
             <span className="rp-bar-title">{title}</span>
@@ -99,7 +99,7 @@ export function RunPanel() {
   const isOpen = (p: PipelineStep) => !!open[`${id}:${p.id}`];
 
   return (
-    <section className="rp" aria-label="Build steps">
+    <section className="rp" aria-label="Progress">
       <div className="rp-card">
         <header className="rp-head">
           <div className="rp-head-text">
@@ -109,11 +109,11 @@ export function RunPanel() {
               {sub}
             </p>
           </div>
-          <button className="rp-close" onClick={() => fold(true)} aria-label="Collapse build steps" title="Collapse">
+          <button className="rp-close" onClick={() => fold(true)} aria-label="Hide the steps" title="Hide the steps">
             <span className="rp-flip"><ChevronDownIcon /></span>
           </button>
           <p className="rp-sr" aria-live="polite">
-            {failed ? `${failed.label} failed` : steps.find((p) => p.status === "active")?.label ?? (running ? "" : "Built")}
+            {failed ? `${stepLabel(failed)} failed` : (steps.map((p) => (p.status === "active" ? stepLabel(p) : null)).find(Boolean) ?? (running ? "" : "Done"))}
           </p>
         </header>
         <ol className="rp-route">
@@ -137,7 +137,7 @@ export function RunPanel() {
                     disabled={!detail}
                     aria-expanded={detail ? expanded : undefined}
                   >
-                    <span className="rp-step-title">{p.label}</span>
+                    <span className="rp-step-title">{stepLabel(p)}</span>
                     <span className="rp-time">{p.startedAt === undefined ? "" : fmtDur(stepMs(p, now), p.status === "active")}</span>
                   </button>
                   <StepLine step={p} run={run} elapsed={stepMs(p, now)} onRetry={() => build(run.overrideEdit ?? undefined, run.previousEdit ? { previousEdit: run.previousEdit } : undefined)} />
@@ -201,7 +201,7 @@ function StepLine({ step, run, elapsed, onRetry }: { step: PipelineStep; run: Ru
           </button>
           {step.id === "plan" && !run.overrideEdit && (
             <button className="rp-btn" onClick={focusComposer}>
-              Edit plan
+              Change my plan
             </button>
           )}
         </div>
@@ -212,14 +212,14 @@ function StepLine({ step, run, elapsed, onRetry }: { step: PipelineStep; run: Ru
   const active = step.status === "active";
   switch (step.id) {
     case "plan":
-      if (active) return <p className="rp-line">{run.overrideEdit ? "Loading the suggested plan" : "Reading your plan"}</p>;
+      if (active) return <p className="rp-line">{run.overrideEdit ? "Loading the suggested option" : "Working out what you asked for"}</p>;
       return (
         <>
           {run.previousEdit && <p className="rp-line">Changing {run.previousEdit.name}</p>}
           {e && <p className="rp-line">{planLine(e)}</p>}
-          {run.planSource === "mock_parser" && <p className="rp-line rp-amber">Sample plan — AI parser not connected</p>}
-          {run.planSource === "alternative" && <p className="rp-line">From a suggested plan</p>}
-          {run.planSource === "restored" && <p className="rp-line">Restored from earlier in this session</p>}
+          {run.planSource === "mock_parser" && <p className="rp-line rp-amber">Example plan used, the plan reader is offline</p>}
+          {run.planSource === "alternative" && <p className="rp-line">From a suggested option</p>}
+          {run.planSource === "restored" && <p className="rp-line">Reopened from earlier</p>}
         </>
       );
     case "stops":
@@ -227,7 +227,7 @@ function StepLine({ step, run, elapsed, onRetry }: { step: PipelineStep; run: Ru
       if (!e.stops.length) return <p className="rp-line">No new stops</p>;
       return (
         <p className={`rp-line${run.stopProblems.length ? " rp-amber" : ""}`}>
-          {e.stops.length - countBad(run)} of {e.stops.length} matched to real places
+          {e.stops.length - countBad(run)} of {e.stops.length} stops found on the map
         </p>
       );
     case "edit":
@@ -236,10 +236,10 @@ function StepLine({ step, run, elapsed, onRetry }: { step: PipelineStep; run: Ru
       if (active)
         return (
           <div className="rp-line-block">
-            <p className="rp-line">{population ? `Simulating ${population.toLocaleString("en-US")} commuters` : "Simulating commuters"}</p>
+            <p className="rp-line">{population ? `Simulating the morning commute for ${population.toLocaleString("en-US")} people` : "Simulating the morning commute"}</p>
             {elapsed > SLOW_MS && (
               <div className="rp-actions">
-                <span className="rp-line">The server is slow.</span>
+                <span className="rp-line">This is taking longer than usual.</span>
                 <button className="rp-btn" onClick={cancelRun}>
                   Cancel
                 </button>
@@ -252,7 +252,7 @@ function StepLine({ step, run, elapsed, onRetry }: { step: PipelineStep; run: Ru
         const why = notSimulatedText(run);
         return (
           <>
-            <p className="rp-line">Not simulated. {why.reason}</p>
+            <p className="rp-line">Not tested. {why.reason}</p>
             {why.detail && <p className="rp-line rp-small">{why.detail}</p>}
           </>
         );
@@ -260,13 +260,13 @@ function StepLine({ step, run, elapsed, onRetry }: { step: PipelineStep; run: Ru
       return (
         <>
           <p className="rp-line">{routeLine(r)}</p>
-          {sourceKind(r) === "mock" && <p className="rp-line rp-amber">Sample numbers — no simulation for this plan</p>}
+          {sourceKind(r) === "mock" && <p className="rp-line rp-amber">Sample numbers, not a real simulation</p>}
         </>
       );
     case "score":
       return r ? <p className="rp-line">{scoreLine(r)}</p> : null;
     case "draw":
-      return active ? <DrawProgress /> : <p className="rp-line">Done</p>;
+      return active ? <DrawProgress /> : <p className="rp-line">Shown on the map</p>;
     default:
       return null;
   }
@@ -275,7 +275,7 @@ function StepLine({ step, run, elapsed, onRetry }: { step: PipelineStep; run: Ru
 const countBad = (run: RunRecord) => new Set(run.stopProblems.map((x) => /stop "(.*?)"/.exec(x)?.[1])).size;
 
 /**
- * "Drawing the line" / "Commuters switching" with a thin bar. Updated through a ref from a store
+ * "Drawing the line" / "Showing who switches to transit" with a thin bar. Updated through a ref from a store
  * subscription, so the line animation does not re-render React every frame.
  */
 const DrawProgress = memo(function DrawProgress() {
@@ -294,7 +294,7 @@ const DrawProgress = memo(function DrawProgress() {
   }, []);
   return (
     <div className="rp-line-block">
-      <p className="rp-line">{phase === "line" ? "Drawing the line" : "Commuters switching"}</p>
+      <p className="rp-line">{phase === "line" ? "Drawing the line" : "Showing who switches to transit"}</p>
       <span className="rp-progress" aria-hidden="true">
         <span ref={fill} className="rp-progress-fill" />
       </span>

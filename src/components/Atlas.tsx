@@ -7,6 +7,12 @@ import { CloseIcon } from "./icons";
 import { useUi } from "./uiStore";
 
 const GROUPS = ["Transit", "Commuters", "After a plan is built", "Context"] as const;
+const GROUP_LABEL: Record<(typeof GROUPS)[number], string> = {
+  Transit: "Transit today",
+  Commuters: "People commuting",
+  "After a plan is built": "Your plan's effects",
+  Context: "Background",
+};
 const css = (c: RGBA) => `rgba(${c[0]},${c[1]},${c[2]},${Math.max(0.6, c[3] / 255)})`;
 
 /** On-demand surfaces opened from the control cluster: the layers popover or the history slide-over. */
@@ -31,14 +37,15 @@ function LayersPopover() {
   const built = useStore((s) => s.scenario !== null);
   const keys = Object.keys(LAYER_META) as LayerKey[];
   return (
-    <div className="surface pop layers" role="dialog" aria-label="Layers">
+    <div className="surface pop layers" role="dialog" aria-label="Map layers">
       <div className="pop-head">
-        <h2 className="pop-title">Layers</h2>
+        <h2 className="pop-title">Show on map</h2>
         <button
           className="text-btn"
+          title="Turn layers back to the starting set and hide any history overlay"
           onClick={() => useStore.getState().set({ layerVisibility: { ...DEFAULT_LAYER_VISIBILITY }, activeHistoryId: null, highlightZone: null, underground: false })}
         >
-          Clear map
+          Reset layers
         </button>
       </div>
       <div className="scroll pop-body">
@@ -47,7 +54,8 @@ function LayersPopover() {
           if (!rows.length) return null;
           return (
             <section key={g} className="layer-group">
-              <h3 className="group-title">{g}</h3>
+              <h3 className="group-title">{GROUP_LABEL[g]}</h3>
+              {g === "After a plan is built" && !built && <p className="pop-note">Available after you build a plan.</p>}
               <ul className="list">
                 {rows.map((k) => {
                   const meta = LAYER_META[k];
@@ -55,7 +63,7 @@ function LayersPopover() {
                   const color = meta.colorKey ? (MAP_COLORS as Record<string, unknown>)[meta.colorKey] : undefined;
                   return (
                     <li key={k}>
-                      <label className="layer-row" data-locked={locked}>
+                      <label className="layer-row" data-locked={locked} title={locked ? "Build a plan first to see this" : undefined}>
                         <i
                           className={`swatch swatch-${k}`}
                           style={Array.isArray(color) ? ({ "--sw": css(color as RGBA) } as React.CSSProperties) : undefined}
@@ -72,9 +80,9 @@ function LayersPopover() {
           );
         })}
         <section className="layer-group">
-          <label className="layer-row">
+          <label className="layer-row" title="See through the ground to tunnels and underground stations">
             <i className="swatch swatch-underground" aria-hidden="true" />
-            <span className="layer-name">Underground</span>
+            <span className="layer-name">See underground</span>
             <input type="checkbox" role="switch" className="switch" checked={underground} onChange={() => useStore.getState().set({ underground: !underground })} />
           </label>
         </section>
@@ -90,7 +98,7 @@ function HistorySheet() {
       <div className="pop-head">
         <div className="grow">
           <h2 className="pop-title">History</h2>
-          <p className="pop-sub">{count} events. Select one to show it on the map.</p>
+          <p className="pop-sub">{count} past decisions that shaped today&apos;s map, such as redlining and highways. Pick one to show it on the map.</p>
         </div>
         <button className="icon-btn" aria-label="Close history" onClick={() => useUi.getState().setUi({ popover: null })}>
           <CloseIcon />

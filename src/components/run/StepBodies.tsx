@@ -3,11 +3,14 @@
 import { useState, type CSSProperties } from "react";
 import { gazetteer } from "@/lib/ai/mock";
 import type { GazetteerKind, VerdictTestKey, ZoneKind } from "@/lib/contract";
-import { formatValue, pct1 } from "@/lib/format";
+import { pct1 } from "@/lib/format";
 import { isMockSection } from "@/lib/provenance";
 import { useStore, type RunRecord } from "@/lib/store";
 import { KindIcon } from "./icons";
+import { plain } from "../results/VerdictPane";
 import { fmtDur, int, stopsKm } from "./runFormat";
+
+const GRADE_WORD = { good: "Good", fair: "Fair", poor: "Poor" } as const;
 
 const mb = (bytes: number) => (bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.round(bytes / 1e3)} KB`);
 const KIND = new Map<string, GazetteerKind>(gazetteer.map((p) => [p.id, p.kind]));
@@ -32,7 +35,7 @@ export function PlanBody({ run }: { run: RunRecord }) {
     <>
       {notes.length > 0 && (
         <div className="rp-quotes">
-          <span className="rp-label">Assumptions</span>
+          <span className="rp-label">What we assumed</span>
           {shown.map((a, i) => (
             <p key={i} className="rp-quote">
               {a}
@@ -70,7 +73,7 @@ export function StopsBody({ run }: { run: RunRecord }) {
               <button
                 className={`rp-place${hover === i ? " is-hover" : ""}`}
                 style={{ "--i": i } as CSSProperties}
-                title={`${kind ? KIND_LABEL[kind] : "Unknown place"}. Click to fly there.`}
+                title={`${kind ? KIND_LABEL[kind] : "Unknown place"}. Click to see it on the map.`}
                 onMouseEnter={() => set({ runHoverStop: i })}
                 onMouseLeave={() => set({ runHoverStop: null })}
                 onFocus={() => set({ runHoverStop: i })}
@@ -135,7 +138,7 @@ export function EditBody({ run }: { run: RunRecord }) {
       {e.chargeZone && (
         <>
           <dt>Charge zone</dt>
-          <dd>{e.chargeZone.length} corners</dd>
+          <dd>Drawn on the map</dd>
         </>
       )}
     </dl>
@@ -163,15 +166,15 @@ export function RouteBody({ run }: { run: RunRecord }) {
       </dd>
       {run.file && (
         <>
-          <dt>Server response</dt>
+          <dt>Simulator replied in</dt>
           <dd>{fmtDur(run.routeMs ?? 0)}</dd>
-          <dt>Saved file ({mb(run.file.bytes)})</dt>
+          <dt>Result loaded in ({mb(run.file.bytes)})</dt>
           <dd>{fmtDur(run.file.ms)}</dd>
         </>
       )}
       {!r.isMock && !!r.mockSections?.length && (
         <>
-          <dt>Sections with sample values</dt>
+          <dt>Parts using sample numbers</dt>
           <dd>{r.mockSections.length}</dd>
         </>
       )}
@@ -187,19 +190,22 @@ export function ScoreBody({ run }: { run: RunRecord }) {
     <ul className="rp-tests">
       {r.verdict.tests.map((t, i) => {
         const zone = TEST_ZONE[t.key];
+        const p = plain(t);
         const sample = r.isMock || isMockSection(r, `verdict.tests.${t.key}`);
         return (
           <li
             key={t.key}
             className={`rp-test${zone ? " is-linked" : ""}`}
             style={{ "--i": i } as CSSProperties}
-            title={t.sublabel}
             onMouseEnter={zone ? () => set({ highlightZone: zone }) : undefined}
             onMouseLeave={zone ? () => set({ highlightZone: null }) : undefined}
           >
-            <span className="rp-test-label">{t.label}</span>
+            <span className="rp-test-label">
+              {p.num ? `${p.num.fmt(p.num.value)} ` : ""}
+              {p.text}
+            </span>
             <span className={`rp-test-val is-${t.grade}`}>
-              {formatValue(t.value, t.unit)}
+              {/^(Not applicable|Baseline)/.test(t.sublabel) ? "" : GRADE_WORD[t.grade]}
               {sample && <span className="rp-tag"> sample</span>}
             </span>
           </li>

@@ -42,7 +42,18 @@ export function sourceKind(r: ScenarioResult): SourceKind {
   const src = r.isMock ? "mock" : scenarioSource(r);
   return src === "live_sim" ? "live" : src === "prebaked_sim" ? "saved" : "mock";
 }
-export const SOURCE_WORDS: Record<SourceKind, string> = { live: "live simulation", saved: "saved run", mock: "sample data" };
+export const SOURCE_WORDS: Record<SourceKind, string> = { live: "live simulation", saved: "saved run", mock: "sample numbers" };
+
+/** What each build step is doing, in the user's words. Keyed by step id. */
+export const STEP_WORDS: Record<string, string> = {
+  plan: "Reading your plan",
+  stops: "Finding the stops",
+  edit: "Changing the map",
+  route: "Rerouting commuters",
+  score: "Scoring the plan",
+  draw: "Drawing the line",
+};
+export const stepLabel = (p: { id: string; label: string }) => STEP_WORDS[p.id] ?? p.label;
 
 /** "Extend the streetcar, 6 stops, every 10 min" */
 export function planLine(e: ScenarioEdit): string {
@@ -109,17 +120,17 @@ export function editLine(e: ScenarioEdit, network: Network | null): string {
 
 /** "272,994 commuters, saved run" */
 export function routeLine(r: ScenarioResult): string {
-  return `${int(r.metrics.proposed.populationModeled)} commuters, ${SOURCE_WORDS[sourceKind(r)]}`;
+  return `${int(r.metrics.proposed.populationModeled)} commuters rerouted, ${SOURCE_WORDS[sourceKind(r)]}`;
 }
 
 /** "Poor, 5 tests" */
 export function scoreLine(r: ScenarioResult): string {
-  return `${cap(r.verdict.label)}, ${r.verdict.tests.length} tests`;
+  return `${cap(r.verdict.label)} plan, ${r.verdict.tests.filter((t) => t.grade === "good").length} of ${r.verdict.tests.length} tests good`;
 }
 
 /** Plain reason a plan was not simulated, plus the simulator's own words when it gave them. */
 export function notSimulatedText(run: RunRecord): { reason: string; detail?: string } {
   const r = run.notSimulatedReason;
-  if (r?.reason === "unsupported") return { reason: "The simulator can't run this kind of plan yet.", detail: r.message };
-  return { reason: "The simulator is offline, and there is no saved run for this plan." };
+  if (r?.reason === "unsupported") return { reason: "This kind of plan can't be tested yet.", detail: r.message };
+  return { reason: "The simulator is offline and this plan has no saved result. Try again later." };
 }

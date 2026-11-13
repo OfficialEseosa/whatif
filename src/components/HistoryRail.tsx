@@ -10,10 +10,11 @@ export function HistoryRail() {
     <ol className="scroll list timeline">
       {history.map((e) => (
         <li key={e.id} className="timeline-item" data-active={active === e.id}>
-          <button className="timeline-btn" aria-pressed={active === e.id} onClick={() => toggle(e.id)}>
+          <button className="timeline-btn" aria-pressed={active === e.id} title={active === e.id ? "Hide this from the map" : "Show this on the map"} onClick={() => toggle(e.id)}>
             <span className="timeline-year num">{e.yearLabel}</span>
             <span className="timeline-title">{e.title}</span>
             <span className="timeline-body">{e.body}</span>
+            <span className="timeline-state">{active === e.id ? "Showing on map. Click to hide" : "Show on map"}</span>
           </button>
           <p className="timeline-source">
             {e.sourceUrl ? (
@@ -24,7 +25,7 @@ export function HistoryRail() {
               e.source
             )}
             {!e.verified && (
-              <span className="quiet-tag">Unverified</span>
+              <span className="quiet-tag" title="We have not yet confirmed this against the source">Source not yet checked</span>
             )}
           </p>
         </li>

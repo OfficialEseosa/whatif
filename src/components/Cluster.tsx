@@ -3,6 +3,7 @@ import { useStore } from "@/lib/store";
 import { ClockIcon, HistoryIcon, LayersIcon } from "./icons";
 import { NavCluster } from "./NavCluster";
 import { useUi } from "./uiStore";
+import "./controls.css";
 
 /** Top-right controls: view switch, layers, history, time, camera. */
 export function Cluster() {
@@ -22,26 +23,27 @@ export function Cluster() {
   return (
     <nav className="cluster" aria-label="Map controls">
       <div className="seg" role="group" aria-label="Map view">
-        <button className="seg-btn" aria-pressed={view === "analysis"} onClick={() => pick("analysis")}>
+        <button className="seg-btn" aria-pressed={view === "analysis"} title="Flat map with data layers" onClick={() => pick("analysis")}>
           Map
         </button>
-        <button className="seg-btn" aria-pressed={view === "photoreal"} onClick={() => pick("photoreal")}>
-          3D
+        <button className="seg-btn" aria-pressed={view === "photoreal"} title="Tilted view with 3D buildings" onClick={() => pick("photoreal")}>
+          3D city
         </button>
       </div>
-      <button className="cbtn" aria-expanded={popover === "layers"} aria-pressed={popover === "layers"} onClick={() => toggle("layers")}>
+      <button className="cbtn" title="Choose what the map shows" aria-expanded={popover === "layers"} aria-pressed={popover === "layers"} onClick={() => toggle("layers")}>
         <LayersIcon />
         Layers
       </button>
-      <button className="cbtn" aria-expanded={popover === "history"} aria-pressed={popover === "history"} onClick={() => toggle("history")}>
+      <button className="cbtn" title={hasOverlay ? "Past decisions that shaped this map (one is showing)" : "Past decisions that shaped this map"} aria-expanded={popover === "history"} aria-pressed={popover === "history"} onClick={() => toggle("history")}>
         <HistoryIcon />
         History
         {hasOverlay && <i className="cbtn-dot" aria-hidden="true" />}
       </button>
-      <button className="cbtn" aria-pressed={timeOpen} onClick={() => setUi({ timeOpen: !timeOpen })}>
+      <button className="cbtn" title={timeOpen ? "Hide the morning commute replay" : "Show the morning commute replay"} aria-pressed={timeOpen} onClick={() => setUi({ timeOpen: !timeOpen })}>
         <ClockIcon />
-        Time
+        Replay
       </button>
+      <i className="cluster-sep" aria-hidden="true" />
       <NavCluster />
     </nav>
   );

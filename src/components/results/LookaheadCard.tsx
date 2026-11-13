@@ -10,19 +10,19 @@ export function LookaheadCard({ lookahead, horizon, mock }: { lookahead: Lookahe
         <span className="num ahead-range">
           {h.householdsAtRisk.low.toLocaleString("en-US")}–{h.householdsAtRisk.high.toLocaleString("en-US")}
         </span>{" "}
-        renter households at risk of being priced out
+        renter households may be priced out
         <MockTag show={mock} what="the look-ahead" />
       </p>
       <p className="note-text">{h.note}</p>
       <div className="ahead-last">
         <span className="label">
-          Last time: {last.title}, {last.period}
+          What happened before: {last.title}, {last.period}
         </span>
         <ul className="list">
           {last.stats.map((s) => (
             <li key={s.label}>
               {s.label}: <span className="num">{s.value}</span> <span className="muted">({s.source})</span>
-              {!s.verified && <span className="quiet-tag">Unverified</span>}
+              {!s.verified && <span className="quiet-tag">Not confirmed</span>}
             </li>
           ))}
         </ul>

@@ -1,0 +1,25 @@
+/* Control labels and grouping for the toolbar, time strip, layers and history. */
+.cluster-sep { width: 1px; height: 20px; margin: 0 4px; background: var(--rule-soft); }
+
+.app.app:has(.timestrip) { --reserve: 254px; }
+.app.app:has(.crumbs):has(.timestrip) { --reserve: 306px; }
+.timestrip.timestrip { flex-direction: column; align-items: stretch; gap: 4px; height: auto; padding: 6px 10px 8px; }
+.ts-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ts-row-2 { justify-content: space-between; flex-wrap: wrap; row-gap: 6px; }
+.ts-group { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ts-label { font-size: 13px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+.ts-end { font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.ts-now { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.ts-now .clock { min-width: 68px; }
+.timestrip .seg-sm .seg-btn { height: 26px; padding: 0 9px; }
+
+.pop-note { padding: 0 8px 8px; font-size: 13px; color: var(--ink-2); }
+.timeline-state { margin-top: 4px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.timeline-btn[aria-pressed="true"] .timeline-state { color: var(--accent); }
+
+@media (max-width: 1100px) {
+  .cluster-sep, .cluster .cbtn-nav { display: none; }
+}
+@media (max-width: 640px) {
+  .ts-row .ts-label, .ts-end { display: none; }
+}

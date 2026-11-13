@@ -1,11 +1,12 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useBuildFlow } from "@/hooks/useBuildFlow";
 import { detectMode, MODE_ACTION } from "@/lib/detectMode";
 import type { PlanMode } from "@/lib/contract";
 import { DEFAULT_TEXT, selectActiveRun, useStore } from "@/lib/store";
 import { ArrowUpIcon, CloseIcon, EditIcon, PlusIcon } from "./icons";
 import { TimeScrubber } from "./TimeScrubber";
+import "./firstrun.css";
 import { editEntry, focusComposer, loadSession, newPlan, persistSession, recordRun, restoreEntry, useUi, type SessionEntry } from "./uiStore";
 
 /** Example inputs: a couple of plans, a sample article, a problem. Clicking fills the box (never submits). */
@@ -35,10 +36,9 @@ export function Composer() {
   const busy = BUSY.has(phase);
   const mode = detectMode(text);
   const multiline = text.includes("\n") || mode === "article";
-  // Examples show on first load and whenever the empty box is focused; typing or a result hides them.
-  const [focused, setFocused] = useState(false);
-  const [touched, setTouched] = useState(false);
-  const showChips = !busy && !built && !hasSession && !text.trim() && (focused || !touched);
+  // Before the first run the dock says what the site does; examples stay visible until something is typed.
+  const firstRun = !busy && !built && !hasSession && !hasRun;
+  const showChips = firstRun && !text.trim();
 
   // Start empty: the store seeds a demo prompt, but an empty box shows the placeholder and the examples.
   useEffect(() => {
@@ -99,7 +99,9 @@ export function Composer() {
       {/* A run's own failure is shown in the run panel; this banner is for anything else. */}
       {error && !busy && !hasRun && (
         <p className="surface dock-error" role="alert">
-          <span className="grow">{error === "Cancelled" ? "Run cancelled." : `Run failed. ${error}`}</span>
+          <span className="grow">
+            {error === "Cancelled" ? "Run cancelled." : `That did not run. ${error}`} <span className="fr-error-next">Press Simulate to try again, or reword the plan.</span>
+          </span>
           <button className="icon-btn" aria-label="Dismiss" onClick={() => useStore.getState().set({ error: null })}>
             <CloseIcon />
           </button>
@@ -108,16 +110,28 @@ export function Composer() {
 
       {hasSession && !busy && <Breadcrumb />}
 
+      {firstRun && (
+        <div className="surface fr-intro">
+          <h1 className="fr-title">What if Atlanta changed its transit?</h1>
+          <p className="fr-lead">Describe a change. See who it helps, who pays, and whether it is worth it.</p>
+        </div>
+      )}
+
       {showChips && (
-        <ul className="list examples" aria-label="Examples">
-          {EXAMPLES.map((ex) => (
-            <li key={ex.label}>
-              <button className="example" onMouseDown={(e) => e.preventDefault()} onClick={() => fill(ex.text)}>
-                {ex.label}
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="fr-try">
+          <span className="fr-try-label" id="fr-try-label">
+            Try one
+          </span>
+          <ul className="list examples" aria-labelledby="fr-try-label">
+            {EXAMPLES.map((ex) => (
+              <li key={ex.label}>
+                <button type="button" className="example" onMouseDown={(e) => e.preventDefault()} onClick={() => fill(ex.text)}>
+                  {ex.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       <form
@@ -136,16 +150,11 @@ export function Composer() {
           ref={ref}
           className="composer-input"
           aria-label={built ? "Change the plan" : "Describe a transit plan, paste an article, or name a problem"}
-          placeholder={built ? "Change the plan" : "Describe a transit plan for Atlanta"}
+          placeholder={built ? "Change this plan, for example: add a stop at Krog Street" : "Try: extend the streetcar to Ponce City Market"}
           rows={1}
           value={text}
           readOnly={busy}
           onChange={(e) => useStore.getState().set({ text: e.target.value })}
-          onFocus={() => {
-            setFocused(true);
-            setTouched(true);
-          }}
-          onBlur={() => setFocused(false)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -162,8 +171,15 @@ export function Composer() {
           }}
         />
         <div className="composer-side">
-          <button className="btn-run" type="submit" disabled={busy || !text.trim()} aria-label={busy ? "Running" : "Run plan"} title={busy ? undefined : MODE_ACTION[mode]}>
-            {busy ? <span className="spinner" aria-hidden="true" /> : <ArrowUpIcon />}
+          <button className="btn-run fr-run" type="submit" disabled={busy || !text.trim()} aria-label={busy ? "Running" : undefined} title={busy ? undefined : MODE_ACTION[mode]}>
+            {busy ? (
+              <span className="spinner" aria-hidden="true" />
+            ) : (
+              <>
+                {built ? "Update" : "Simulate"}
+                <ArrowUpIcon />
+              </>
+            )}
           </button>
         </div>
       </form>

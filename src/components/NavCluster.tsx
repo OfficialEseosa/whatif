@@ -57,17 +57,17 @@ export function NavCluster() {
 
   return (
     <>
-      <button className="cbtn" onClick={() => flyTo(INITIAL_CAMERA, 1600)}>
+      <button className="cbtn" title="Fly back to the starting view of Atlanta" onClick={() => flyTo(INITIAL_CAMERA, 1600)}>
         <ResetIcon />
-        Reset
+        Reset view
       </button>
-      <button className="cbtn cbtn-icon" aria-label="Rotate left (hold to repeat)" title="Rotate left" {...rotL}>
+      <button className="cbtn cbtn-icon cbtn-nav" aria-label="Turn map left (hold to keep turning)" title="Turn map left (hold to keep turning)" {...rotL}>
         ⟲
       </button>
       <button
         className="cbtn cbtn-icon"
-        aria-label="Compass: click to face north, drag around it to rotate"
-        title="Click: face north. Drag around: rotate"
+        aria-label="Compass: click to put north at the top, drag around it to turn the map"
+        title="Compass. Click to put north at the top, drag to turn the map"
         onPointerDown={(e) => {
           const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
           drag.current = { cx: r.left + r.width / 2, cy: r.top + r.height / 2, moved: false };
@@ -100,13 +100,13 @@ export function NavCluster() {
           <path d="M9 16.5 5.5 9h7L9 16.5Z" fill="currentColor" opacity="0.55" />
         </svg>
       </button>
-      <button className="cbtn cbtn-icon" aria-label="Rotate right (hold to repeat)" title="Rotate right" {...rotR}>
+      <button className="cbtn cbtn-icon cbtn-nav" aria-label="Turn map right (hold to keep turning)" title="Turn map right (hold to keep turning)" {...rotR}>
         ⟳
       </button>
-      <button className="cbtn cbtn-icon" aria-label="Tilt up (hold to repeat)" title="Tilt up" {...tiltUp}>
+      <button className="cbtn cbtn-icon cbtn-nav" aria-label="Tilt view toward the horizon (hold to keep tilting)" title="Tilt view toward the horizon (hold to keep tilting)" {...tiltUp}>
         ⤒
       </button>
-      <button className="cbtn cbtn-icon" aria-label="Tilt down (hold to repeat)" title="Tilt down" {...tiltDown}>
+      <button className="cbtn cbtn-icon cbtn-nav" aria-label="Tilt view to look straight down (hold to keep tilting)" title="Tilt view to look straight down (hold to keep tilting)" {...tiltDown}>
         ⤓
       </button>
     </>

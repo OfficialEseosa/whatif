@@ -7,13 +7,19 @@ import type { LngLat, ScenarioSource } from "@/lib/contract";
 import { ChevronDownIcon, CloseIcon } from "../icons";
 import { focusComposer, useUi, type UiTab } from "../uiStore";
 import { editLine, notSimulatedText, planLine } from "../run/runFormat";
-import { Alternatives, ClaimCheckList, TestRows, VERDICT_GRADE, VERDICT_WORD } from "./VerdictPane";
+import { Alternatives, ClaimCheckList, TestRows, VERDICT_GRADE, VERDICT_WORD, verdictReason } from "./VerdictPane";
 import { ImpactPane } from "./ImpactPane";
 import { WhoPaysPane } from "./WhoPaysPane";
 import { TownHallPane } from "./TownHallPane";
 import { PersonaChat } from "./PersonaChat";
+import "./results.css";
 
-const SOURCE_SHORT: Record<ScenarioSource, string> = { live_sim: "Live simulation", prebaked_sim: "Saved run", mock: "Sample data" };
+const SOURCE_SHORT: Record<ScenarioSource, string> = { live_sim: "Live simulation", prebaked_sim: "Saved run", mock: "Sample numbers, not a real run" };
+const SOURCE_HINT: Record<ScenarioSource, string> = {
+  live_sim: "Simulated just now for this plan",
+  prebaked_sim: "Simulated earlier and saved",
+  mock: "Placeholder numbers to show the layout, not a simulation of this plan",
+};
 
 /** One compact card on the right once a plan has run: verdict, headline, five tests; the rest under Details. */
 export function ResultsPanel() {
@@ -55,6 +61,7 @@ function Card() {
   const inBox = (p: LngLat) => !bbox || (p[0] >= bbox[0] && p[0] <= bbox[2] && p[1] >= bbox[1] && p[1] <= bbox[3]);
   const v = scenario.verdict;
   const grade = VERDICT_GRADE[v.label];
+  const reason = verdictReason(v);
   const source = scenarioSource(scenario);
   const hasClaims = scenario.claims.length > 0;
   const anyMock = scenario.isMock || (scenario.mockSections?.length ?? 0) > 0;
@@ -65,11 +72,11 @@ function Card() {
   }, [scenario.id, scenario.claims.length, setUi]);
 
   const tabs: { id: UiTab; label: string }[] = [
-    ...(hasClaims ? [{ id: "claims" as const, label: "Article check" }] : []),
-    { id: "impact", label: "Impact" },
+    ...(hasClaims ? [{ id: "claims" as const, label: "Fact check" }] : []),
+    { id: "impact", label: "Travel" },
     { id: "whoPays", label: "Who pays" },
-    { id: "townHall", label: "Residents" },
-    { id: "better", label: "Alternatives" },
+    { id: "townHall", label: "Ask residents" },
+    { id: "better", label: "Better options" },
   ];
   const current = tabs.some((t) => t.id === tab) ? tab : tabs[0].id;
   const pick = (t: UiTab) => {
@@ -89,21 +96,24 @@ function Card() {
         </button>
       </header>
       <p className="verdict-headline">{v.headline}</p>
+      {reason && <p className="verdict-reason">{reason}</p>}
 
       <div className="results-tests">
         <TestRows verdict={v} />
       </div>
 
       <div className="results-foot">
-        <span className={`source source-${anyMock ? "mock" : source}`}>{anyMock ? "Sample data" : SOURCE_SHORT[source]}</span>
+        <span className={`source source-${anyMock ? "mock" : source}`} title={SOURCE_HINT[anyMock ? "mock" : source]}>
+          {SOURCE_SHORT[anyMock ? "mock" : source]}
+        </span>
         <button className="btn details-btn" aria-expanded={details} onClick={() => setUi({ details: !details })}>
-          {details ? "Hide details" : "Details"}
+          {details ? "Hide breakdown" : "See the full breakdown"}
           <ChevronDownIcon />
         </button>
       </div>
       {details && (
         <div className="details">
-          <div className="tabs" role="tablist" aria-label="Details">
+          <div className="tabs" role="tablist" aria-label="Full breakdown">
             {tabs.map((t) => (
               <button
                 key={t.id}
@@ -168,7 +178,7 @@ function NotSimulated({ run }: { run: RunRecord }) {
     <aside className="surface results" aria-label="Results">
       <header className="results-head">
         <div className="grow">
-          <h2 className="verdict-word">Not simulated</h2>
+          <h2 className="verdict-word">No results for this plan</h2>
           <p className="results-title">{e.name}</p>
         </div>
         <button className="icon-btn" aria-label="Close results" onClick={() => set({ resultsOpen: false })}>
@@ -178,11 +188,14 @@ function NotSimulated({ run }: { run: RunRecord }) {
       <p className="verdict-headline">
         {e.type === "change_frequency" ? `${editLine(e, network)}.` : `${planLine(e)}. ${editLine(e, network)}.`}
       </p>
-      <p className="verdict-headline">{why.reason}</p>
-      <div className="results-foot">
+      <p className="verdict-reason">We understood the plan and drew it on the map, but could not test it. {why.reason}</p>
+      <div className="results-foot results-actions">
         {/* The only plan with a saved simulation run today (public/scenarios/beltline-streetcar.sim.json). */}
         <button className="btn" onClick={tryStreetcar}>
-          Try: Streetcar to Ponce City Market
+          Try the streetcar example
+        </button>
+        <button className="btn" onClick={focusComposer}>
+          Change my plan
         </button>
       </div>
     </aside>

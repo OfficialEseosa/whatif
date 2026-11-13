@@ -1,0 +1,11 @@
+/* Results card details: small additions on top of globals.css. */
+.pane-hint { font-size: 14px; line-height: 20px; color: var(--ink-2); }
+.facts { display: grid; gap: 6px; margin: 0; }
+.facts > div { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; font-size: 14px; line-height: 20px; }
+.facts dt { color: var(--ink-2); }
+.facts dd { margin: 0; text-align: right; }
+.bar-key { display: flex; gap: 16px; font-size: 13px; color: var(--ink-2); }
+.bar-key span { display: inline-flex; align-items: center; gap: 6px; }
+.bar-key i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.card-static { cursor: default; }
+.results-actions { display: flex; flex-wrap: wrap; gap: 8px; }
