@@ -376,8 +376,10 @@ export function fallbackEdit(text: string, opts: FallbackOptions = {}): Scenario
   // Roads.
   let roadIds: string[] | undefined;
   let roadNames: string[] = [];
+  // Road shorthands ("Ponce") never match inside a place name ("Ponce City Market").
+  const placeTokens: ReadonlySet<number> = new Set(covered);
   if (ROAD_TYPES.has(type)) {
-    const mentions = findRoadMentions(text, network);
+    const mentions = findRoadMentions(text, network, placeTokens);
     for (const m of mentions) for (let i = m.start; i < m.end; i++) covered.add(i);
     const ids = [...new Set(mentions.flatMap((m) => m.roadIds))];
     roadNames = mentions.map((m) => m.displayName);
@@ -385,7 +387,7 @@ export function fallbackEdit(text: string, opts: FallbackOptions = {}): Scenario
     else assumptions.push("No road in the network matched a name in the text; roadIds omitted.");
   } else {
     // Still mark road mentions as covered so they are not reported as unknown places.
-    for (const m of findRoadMentions(text, network)) for (let i = m.start; i < m.end; i++) covered.add(i);
+    for (const m of findRoadMentions(text, network, placeTokens)) for (let i = m.start; i < m.end; i++) covered.add(i);
   }
 
   // Unknown places.

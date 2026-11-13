@@ -14,7 +14,9 @@
  *     with the corridor's tech, a compatible base line, the terminus among the
  *     stops and no stop outside the corridor's places;
  *   - values the user stated (headway, lanes removed) are kept even if they
- *     differ from the saved run (the edit then simply won't match it).
+ *     differ from the saved run (the edit then simply won't match it);
+ *   - fix mode: when the parser found nothing it can simulate and the problem
+ *     names an area the corridor serves, the corridor is offered as the plan.
  *
  * Add an entry here when a new saved run is added to public/scenarios.
  */
@@ -32,6 +34,8 @@ export interface KnownCorridor {
   terminusId: string;
   /** Gazetteer places a request may name and still mean this corridor (its stops and areas it runs through). */
   placeIds: string[];
+  /** Fix mode: areas this corridor serves. */
+  serves: RegExp;
   /** The edit the saved run was built from (must equal that run's `edit`). */
   edit: () => ScenarioEdit;
 }
@@ -51,6 +55,7 @@ export const KNOWN_CORRIDORS: KnownCorridor[] = [
       "old_fourth_ward",
       "inman_park",
     ],
+    serves: /\beast ?side\b|\bold fourth ward\b|\bo4w\b|\binman park\b|\bponce city market\b|\bedgewood\b|\bbeltline\b/i,
     edit: cannedStreetcarEdit,
   },
 ];
@@ -65,6 +70,13 @@ export function matchesCorridor(edit: ScenarioEdit, corridor: KnownCorridor): bo
   if (edit.baseLineId !== undefined && edit.baseLineId !== corridor.baseLineId) return false;
   const ids = edit.stops.map((s) => s.gazetteerId);
   return ids.includes(corridor.terminusId) && ids.every((id) => corridor.placeIds.includes(id));
+}
+
+/** True when the edit gives the simulator something to change (places, roads, a line, or a zone). */
+export function isActionable(edit: ScenarioEdit): boolean {
+  if (edit.type === "congestion_charge") return true;
+  if (edit.roadIds?.length || edit.baseLineId) return true;
+  return LINE_TYPES.has(edit.type) || edit.type === "new_bus_route" ? edit.stops.length >= 2 : edit.stops.length > 0;
 }
 
 /** "keep all car lanes", "without removing a lane", "no lane removal" -> 0 lanes removed. */
@@ -109,5 +121,12 @@ function corridorEdit(corridor: KnownCorridor, parsed: ScenarioEdit, text: strin
 export function resolveKnownCorridor(req: PlanRequest, res: PlanResponse, corridors: KnownCorridor[] = KNOWN_CORRIDORS): PlanResponse {
   const direct = corridors.find((c) => matchesCorridor(res.edit, c));
   if (direct) return { ...res, edit: corridorEdit(direct, res.edit, req.text, "Matched a studied corridor that has a saved simulation run.") };
+  if (req.mode === "fix" && !isActionable(res.edit)) {
+    const served = corridors.find((c) => c.serves.test(req.text));
+    if (served) {
+      const note = "Fix mode: the keyword parser cannot design a fix, so this suggests a studied corridor that serves the area you named.";
+      return { ...res, edit: corridorEdit(served, { ...res.edit, type: served.edit().type, headwayMin: undefined }, req.text, note) };
+    }
+  }
   return res;
 }

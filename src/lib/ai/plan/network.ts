@@ -203,6 +203,16 @@ export function findRoadIdsByName(name: string, network: Network = loadNetwork()
   return ids ? [...ids] : [];
 }
 
+/**
+ * Everyday one-word names for long road names ("Bus lane on Ponce"):
+ * normalised token -> normalised base road name. Only tried where no full
+ * road name matches, and never inside a token span the caller excludes
+ * (e.g. a gazetteer place such as "Ponce City Market").
+ */
+export const ROAD_SHORTHANDS: Record<string, string> = {
+  ponce: "ponce de leon avenue",
+};
+
 export interface RoadMention {
   /** The normalised road name that matched. */
   name: string;
@@ -219,8 +229,13 @@ export interface RoadMention {
  * no overlaps, in order of first mention. Single-token road names (e.g. the
  * street literally called "Boulevard") are skipped when scanning free text
  * because they collide with ordinary words; use `findRoadIdsByName` for those.
+ * ROAD_SHORTHANDS are matched at token positions not in `skipShorthand`.
  */
-export function findRoadMentions(text: string, network: Network = loadNetwork()): RoadMention[] {
+export function findRoadMentions(
+  text: string,
+  network: Network = loadNetwork(),
+  skipShorthand: ReadonlySet<number> = new Set(),
+): RoadMention[] {
   const idx = getIndex(network);
   const tokens = tokenize(text);
   const seen = new Set<string>();
@@ -232,6 +247,8 @@ export function findRoadMentions(text: string, network: Network = loadNetwork())
       const key = tokens.slice(i, i + len).join(" ");
       if (idx.roadsByFullName.has(key) || idx.roadsByBaseName.has(key)) hit = { key, len };
     }
+    const short = ROAD_SHORTHANDS[tokens[i]];
+    if (!hit && short && !skipShorthand.has(i) && idx.roadsByBaseName.has(short)) hit = { key: short, len: 1 };
     if (hit) {
       if (!seen.has(hit.key)) {
         seen.add(hit.key);
