@@ -58,10 +58,12 @@ summary:
 - Use only the numbers you are given. Round them to whole numbers ("under an hour" for less than 1). Do not add facts.
 - Plain words. Say "hours of commuting", "people switch to transit", "formerly redlined neighborhoods". Never say commuter-hours, headway, tract, mode share, BRT.
 - Give a reason only when the plan itself shows it (a car lane was taken, the line has only two stops, it runs rarely), and call it likely.
+- Mention the average commute only when it changes by a whole minute or more. Never write "from 49 to 49 minutes".
 - No advice in the summary, no hedging filler, no exclamation marks.
 
 followUps:
 - Each must be a change this simulator can run: how often it runs ("Run it every 5 minutes"), adding or dropping a stop at a place from PLACES ("Add a stop at Centennial Olympic Park"), extending it to a place from PLACES, switching the vehicle (bus, bus lane, streetcar, light rail), or for a bus lane how many car lanes it takes ("Keep all car lanes").
+- When the plan only changes how often an existing line runs (type change_frequency), suggest only other frequencies or the same change on another line ("Run the Blue Line every 5 minutes"). Never suggest adding a stop to it.
 - Aim them at what scored worst. Do not suggest what the plan already has.
 - Always answer with the submit_explanation tool.`;
 

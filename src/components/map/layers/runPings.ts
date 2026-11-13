@@ -21,6 +21,8 @@ import {
 import type { LngLat, Stop } from "@/lib/contract";
 import { prefersReducedMotion } from "@/hooks/useReducedMotion";
 import { selectActiveRun, useStore } from "@/lib/store";
+import { CORE_BBOX } from "@/lib/geo";
+import { outsideCoverage } from "@/components/run/runFormat";
 import { LIFT_M, lift, liftPoint } from "./common";
 
 export const PING_STAGGER_MS = 120;
@@ -32,6 +34,10 @@ const PAPER: [number, number, number] = [18, 19, 22]; // dark fills / label back
 const DASH = new PathStyleExtension({ dash: true });
 
 type StopD = Stop & { i: number };
+
+const [W, S, E, N] = CORE_BBOX;
+const COVERAGE: { path: LngLat[] }[] = [{ path: [[W, S], [E, S], [E, N], [W, N], [W, S]] }];
+const COVERAGE_LABEL: { at: LngLat }[] = [{ at: [(W + E) / 2, N] }];
 
 /** Layers for the run panel's map coupling. Call once per DeckMap render (it is a hook). */
 export function useRunPingLayers(photoreal: boolean): Layer[] {
@@ -98,6 +104,7 @@ export function useRunPingLayers(photoreal: boolean): Layer[] {
 
 
   const failed = run?.error != null;
+  const outside = outsideCoverage(run);
   const pre = !lineStarted && !failed; // until the simulated line starts drawing
   const reduced = t === 0 && prefersReducedMotion();
   const hovered = hover !== null ? stops[hover] : undefined;
@@ -112,6 +119,36 @@ export function useRunPingLayers(photoreal: boolean): Layer[] {
     const ln = (path: LngLat[]) => lift(path, z);
     const layers: Layer[] = [];
 
+    // The plan reaches past the modeled area: outline what the simulator covers.
+    if (outside)
+      layers.push(
+        new PathLayer<{ path: LngLat[] }>({
+          id: "run-coverage",
+          data: COVERAGE,
+          getPath: (d) => ln(d.path),
+          getColor: [...ACCENT, 220],
+          getWidth: 2,
+          widthUnits: "pixels",
+          getDashArray: [6, 4],
+          dashJustified: true,
+          ...ext([DASH]),
+        } as PathLayerProps<{ path: LngLat[] }> &
+          PathStyleExtensionProps<{ path: LngLat[] }>),
+        new TextLayer<{ at: LngLat }>({
+          id: "run-coverage-label",
+          data: COVERAGE_LABEL,
+          getPosition: (d) => pt(d.at),
+          getText: () => "Area the simulator covers",
+          getSize: 12,
+          getColor: [...ACCENT, 255],
+          fontFamily: "system-ui, sans-serif",
+          background: true,
+          getBackgroundColor: [...PAPER, 230],
+          backgroundPadding: [4, 2],
+          getPixelOffset: [0, -12],
+          ...ext(),
+        }),
+      );
     if (pre && roads.length)
       layers.push(
         new PathLayer<{ path: LngLat[] }>({
@@ -227,6 +264,7 @@ export function useRunPingLayers(photoreal: boolean): Layer[] {
     edit,
     photoreal,
     pre,
+    outside,
     roads,
     schematic,
     label,

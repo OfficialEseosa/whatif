@@ -6,6 +6,7 @@ import { checkEditAgainstGazetteer, type LngLat, type Network, type ScenarioEdit
 import { useStore, type PipelineStep, type RunRecord } from "@/lib/store";
 import type { PlanMode } from "@/lib/contract";
 import { prefersReducedMotion } from "./useReducedMotion";
+import { CORE_BBOX } from "@/lib/geo";
 
 export const RUN_STEPS: PipelineStep[] = [
   { id: "plan", label: "Read plan", status: "pending" },
@@ -188,7 +189,12 @@ export function useBuildFlow() {
         const steps = st().runs.find((r) => r.id === id)?.steps.filter((p) => p.id !== "score" && p.id !== "draw") ?? [];
         patch({ notSimulated: true, notSimulatedReason: notSimulated ?? { reason: "offline" }, steps, endedAt: performance.now() });
         st().set({ phase: "done", pipeline: steps, resultsOpen: true });
-        const cam = cameraForEdit(plan.edit, st().network, st().view === "photoreal");
+        // Out-of-area plans: frame the plan together with the outlined area the simulator covers.
+        const [w, s, e, n] = CORE_BBOX;
+        const outside = /outside the area/i.test(notSimulated?.message ?? "");
+        const cam = outside
+          ? cameraForPoints([...plan.edit.stops.map((p) => p.coord), [w, s], [e, n]], st().view === "photoreal")
+          : cameraForEdit(plan.edit, st().network, st().view === "photoreal");
         if (cam) st().set({ camera: cam });
         return;
       }

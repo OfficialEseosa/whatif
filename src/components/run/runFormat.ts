@@ -128,9 +128,21 @@ export function scoreLine(r: ScenarioResult): string {
   return `${cap(r.verdict.label)} plan, ${r.verdict.tests.filter((t) => t.grade === "good").length} of ${r.verdict.tests.length} tests good`;
 }
 
+/** Where the simulator can test a plan today (CORE_BBOX in lib/geo.ts), in words a resident knows. */
+export const COVERAGE_TEXT =
+  "Right now it covers central Atlanta: Downtown, Midtown and Georgia Tech, east through Old Fourth Ward and Inman Park to Little Five Points (the outlined area on the map).";
+
+/** True when the simulator refused the plan because a place is outside the area it models. */
+export function outsideCoverage(run: RunRecord | null | undefined): boolean {
+  return run?.notSimulatedReason?.reason === "unsupported" && /outside the area/i.test(run.notSimulatedReason.message ?? "");
+}
+
 /** Plain reason a plan was not simulated, plus the simulator's own words when it gave them. */
 export function notSimulatedText(run: RunRecord): { reason: string; detail?: string } {
   const r = run.notSimulatedReason;
-  if (r?.reason === "unsupported") return { reason: "This kind of plan can't be tested yet.", detail: r.message };
+  if (r?.reason === "unsupported") {
+    if (outsideCoverage(run)) return { reason: "Part of this plan is outside the area the simulator covers.", detail: `${r.message!.replace(/[.\s]+$/, "")}. ${COVERAGE_TEXT}` };
+    return { reason: "This kind of plan can't be tested yet.", detail: r.message };
+  }
   return { reason: "The simulator is offline and this plan has no saved result. Try again later." };
 }

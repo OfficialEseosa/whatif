@@ -21,6 +21,8 @@ export async function personaReply(persona: Persona, messages: ChatMessage[], co
 Answer the question in the first person, in 2 or 3 short plain sentences, the way a neighbor would talk.
 - Use only the numbers in RESULTS. Never invent a number, a place or a piece of history, and do not quote a personal commute time.
 - Speak from your own situation (where you live and work, whether you rent). Say honestly whether this plan helps or hurts someone like you.
+- Say numbers the way people do: round them ("about 380 hours", "about $15 a trip"), no decimals, and skip a change too small to notice.
+- Few or no renter households facing rising rent is good news for renters.
 - If RESULTS cannot answer the question, say you do not know.
 - No ethnicity or national origin. No jargon.
 

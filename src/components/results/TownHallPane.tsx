@@ -2,7 +2,7 @@ import type { Persona } from "@/lib/contract";
 
 const STANCE = { for: "For", against: "Against", mixed: "Undecided" } as const;
 
-export function TownHallPane({ personas, onSelect }: { personas: Persona[]; onSelect: (p: Persona) => void; mock: boolean }) {
+export function TownHallPane({ personas, onSelect, mock }: { personas: Persona[]; onSelect: (p: Persona) => void; mock: boolean }) {
   if (!personas.length) return <p className="muted">No residents to ask for this plan.</p>;
   return (
     <div className="stack-sm">
@@ -15,10 +15,10 @@ export function TownHallPane({ personas, onSelect }: { personas: Persona[]; onSe
                 <strong className="grow">
                   {p.name}, {p.age}
                 </strong>
-                <span className={`badge stance-${p.stance}`}>{STANCE[p.stance]}</span>
+                {!mock && <span className={`badge stance-${p.stance}`}>{STANCE[p.stance]}</span>}
               </span>
               <span className="small muted">{p.descriptor}</span>
-              <q>{p.quote}</q>
+              {!mock && <q>{p.quote}</q>}
               <span className="item-go">Ask {p.name.split(" ")[0]}</span>
             </button>
           </li>

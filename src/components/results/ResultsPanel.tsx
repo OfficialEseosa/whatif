@@ -167,7 +167,7 @@ function Card() {
               />
             )}
           </div>
-          {chatOpen && current === "townHall" && <PersonaChat personas={scenario.personas} />}
+          {chatOpen && current === "townHall" && <PersonaChat personas={scenario.personas} mock={mk("personas")} />}
         </div>
       )}
     </aside>

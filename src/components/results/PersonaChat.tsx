@@ -4,7 +4,8 @@ import type { Persona } from "@/lib/contract";
 import { usePersonaChat } from "@/hooks/usePersonaChat";
 import { useStore } from "@/lib/store";
 
-export function PersonaChat({ personas }: { personas: Persona[] }) {
+/** `mock`: the residents are stand-ins not drawn from this plan's run, so their scripted opening line is not shown. */
+export function PersonaChat({ personas, mock }: { personas: Persona[]; mock?: boolean }) {
   const chat = useStore((s) => s.chat);
   const close = useStore((s) => s.closeChat);
   const send = usePersonaChat();
@@ -20,7 +21,7 @@ export function PersonaChat({ personas }: { personas: Persona[] }) {
         </button>
       </div>
       <ul className="list chat-log stack-sm" aria-live="polite">
-        <li className="msg msg-persona">{persona.quote}</li>
+        {!mock && <li className="msg msg-persona">{persona.quote}</li>}
         {chat.messages.map((m, i) => (
           <li key={i} className={`msg msg-${m.role}`}>
             {m.content}
