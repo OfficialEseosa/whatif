@@ -34,6 +34,14 @@ export type CameraTarget = {
 
 export const INITIAL_CAMERA: CameraTarget = { longitude: -84.374, latitude: 33.762, zoom: 13.4, pitch: 45, bearing: -12 };
 
+/** Where the camera starts before it flies in to INITIAL_CAMERA. */
+export const ORBIT_CAMERA: CameraTarget = { longitude: -96, latitude: 37, zoom: 2.4, pitch: 0, bearing: 0, transitionDuration: 0 };
+
+/** The camera as it is right now (follows drags and transitions). Read-only for the UI. */
+export type LiveView = { longitude: number; latitude: number; zoom: number; pitch: number; bearing: number; height: number };
+export type Drawer = "history" | "layers";
+export type Attribution = { google: boolean; text: string };
+
 export const DEFAULT_TEXT: Record<PlanMode, string> = {
   prompt: "extend the streetcar along the Beltline to Ponce City Market",
   article: SAMPLE_ARTICLE,
@@ -62,6 +70,10 @@ type State = {
   history: HistoryEvent[];
   view: MapViewMode;
   camera: CameraTarget;
+  live: LiveView;
+  drawer: Drawer | null;
+  resultsOpen: boolean;
+  attribution: Attribution;
   time: number;
   playing: boolean;
   horizon: Horizon;
@@ -80,6 +92,9 @@ type Actions = {
   setInputMode: (m: PlanMode) => void;
   setPipelineStep: (id: string, patch: Partial<PipelineStep>) => void;
   toggleHistory: (id: string) => void;
+  toggleDrawer: (d: Drawer) => void;
+  /** Move the camera from where it is now. */
+  flyTo: (patch: Partial<CameraTarget>, ms?: number) => void;
   openChat: (personaId: string) => void;
   closeChat: () => void;
 };
@@ -96,7 +111,11 @@ export const useStore = create<State & Actions>((set) => ({
   network: null,
   history: HistorySchema.parse(historyJson).sort((a, b) => a.year - b.year),
   view: "analysis",
-  camera: INITIAL_CAMERA,
+  camera: ORBIT_CAMERA,
+  live: { longitude: ORBIT_CAMERA.longitude, latitude: ORBIT_CAMERA.latitude, zoom: ORBIT_CAMERA.zoom, pitch: 0, bearing: 0, height: 800 },
+  drawer: null,
+  resultsOpen: true,
+  attribution: { google: false, text: "" },
   time: 6600,
   playing: true,
   horizon: "opening",
@@ -112,6 +131,15 @@ export const useStore = create<State & Actions>((set) => ({
   setPipelineStep: (id, patch) =>
     set((s) => ({ pipeline: s.pipeline.map((p) => (p.id === id ? { ...p, ...patch } : p)) })),
   toggleHistory: (id) => set((s) => ({ activeHistoryId: s.activeHistoryId === id ? null : id })),
+  toggleDrawer: (d) => set((s) => ({ drawer: s.drawer === d ? null : d })),
+  flyTo: (patch, ms = 500) =>
+    set(({ live, camera }) => {
+      // Mid-flight to a far-away target (the opening fly-in): keep heading there instead of stopping short.
+      const from = Math.abs(camera.zoom - live.zoom) > 3 ? camera : live;
+      return {
+        camera: { longitude: from.longitude, latitude: from.latitude, zoom: from.zoom, pitch: from.pitch, bearing: from.bearing, ...patch, transitionDuration: ms },
+      };
+    }),
   openChat: (personaId) => set({ chat: { personaId, messages: [], pending: false } }),
   closeChat: () => set({ chat: null }),
 }));

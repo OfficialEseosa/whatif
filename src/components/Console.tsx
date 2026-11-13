@@ -1,29 +1,38 @@
 "use client";
-/** One-screen console. Layout only; data comes from the store and hooks. */
+/** Full-screen map with floating controls. Layout only; data comes from the store and hooks. */
 import { useBootData } from "@/hooks/useBootData";
 import { useClock } from "@/hooks/useClock";
 import { Banner } from "./Banner";
 import { CommandBar } from "./CommandBar";
-import { HistoryRail } from "./HistoryRail";
 import { MapStage } from "./MapStage";
+import { NavCluster } from "./NavCluster";
+import { StatusBar } from "./StatusBar";
 import { TimeScrubber } from "./TimeScrubber";
+import { ToolRail } from "./ToolRail";
+import { OverlayNote } from "./map/OverlayNote";
 import { ResultsPanel } from "./results/ResultsPanel";
 
 export function Console() {
   useBootData();
   useClock();
   return (
-    <div className="console">
-      <Banner />
-      <CommandBar />
-      <div className="console-main">
-        <HistoryRail />
-        <div className="console-center">
-          <MapStage />
-          <TimeScrubber />
-        </div>
-        <ResultsPanel />
+    <div className="earth">
+      <MapStage />
+      <div className="left">
+        <header className="top">
+          <Banner />
+          <CommandBar />
+        </header>
+        <ToolRail />
       </div>
+      <ResultsPanel />
+      <OverlayNote />
+      <div className="dock">
+        <span className="dock-side" />
+        <TimeScrubber />
+        <NavCluster />
+      </div>
+      <StatusBar />
     </div>
   );
 }

@@ -2,7 +2,7 @@
 import { PathLayer } from "@deck.gl/layers";
 import type { BeltlineSegment, Network } from "@/lib/contract";
 import { MAP_COLORS } from "../colors";
-import { overlayParameters } from "./common";
+import { overlayProps } from "./common";
 
 export function beltlineLayer(network: Network, photoreal: boolean) {
   return new PathLayer<BeltlineSegment>({
@@ -13,6 +13,6 @@ export function beltlineLayer(network: Network, photoreal: boolean) {
     getWidth: 2,
     widthUnits: "pixels",
     capRounded: true,
-    parameters: overlayParameters(photoreal),
+    ...overlayProps(photoreal),
   });
 }

@@ -3,7 +3,7 @@ import type { Persona } from "@/lib/contract";
 export function TownHallPane({ personas, onSelect }: { personas: Persona[]; onSelect: (p: Persona) => void }) {
   return (
     <div className="stack-sm">
-      <p className="small muted">Each resident sees only their own numbers. Click one to talk to them.</p>
+      <p className="small muted">Each resident sees only their own numbers. Choose one to fly to their block and talk to them.</p>
       {personas.map((p) => (
         <button key={p.id} className="card" onClick={() => onSelect(p)}>
           <span className="row">
@@ -14,7 +14,13 @@ export function TownHallPane({ personas, onSelect }: { personas: Persona[]; onSe
           </span>
           <span className="small muted">{p.descriptor}</span>
           <q>{p.quote}</q>
-          <span className="small mono">{p.stakeChips.join(" · ")}</span>
+          <span className="chips">
+            {p.stakeChips.map((c) => (
+              <span key={c} className="chip mono">
+                {c}
+              </span>
+            ))}
+          </span>
         </button>
       ))}
     </div>

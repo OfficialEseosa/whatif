@@ -2,7 +2,7 @@
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import type { LngLat, ScenarioResult, Stop } from "@/lib/contract";
 import { MAP_COLORS } from "../colors";
-import { cumulativeFractions, overlayParameters, partialPath } from "./common";
+import { cumulativeFractions, overlayProps, partialPath } from "./common";
 
 type StopD = Stop & { at: number };
 
@@ -19,7 +19,7 @@ export function proposedLineLayers(line: ScenarioResult["line"], progress: numbe
     });
     return { ...s, at: fr[bi] };
   });
-  const parameters = overlayParameters(photoreal);
+  const onTerrain = overlayProps(photoreal);
   const data = [{ path }];
   return [
     new PathLayer<{ path: LngLat[] }>({
@@ -31,7 +31,7 @@ export function proposedLineLayers(line: ScenarioResult["line"], progress: numbe
       widthUnits: "pixels",
       capRounded: true,
       jointRounded: true,
-      parameters,
+      ...onTerrain,
     }),
     new PathLayer<{ path: LngLat[] }>({
       id: "proposed-line",
@@ -42,7 +42,7 @@ export function proposedLineLayers(line: ScenarioResult["line"], progress: numbe
       widthUnits: "pixels",
       capRounded: true,
       jointRounded: true,
-      parameters,
+      ...onTerrain,
     }),
     new ScatterplotLayer<StopD>({
       id: "proposed-stops",
@@ -57,7 +57,7 @@ export function proposedLineLayers(line: ScenarioResult["line"], progress: numbe
       pickable: true,
       transitions: { getRadius: { duration: 300 } },
       updateTriggers: { getRadius: stops.filter((d) => progress >= d.at - 0.01).length },
-      parameters,
+      ...onTerrain,
     }),
   ];
 }

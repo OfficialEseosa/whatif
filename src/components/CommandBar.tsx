@@ -2,6 +2,7 @@
 import { useBuildFlow } from "@/hooks/useBuildFlow";
 import type { PlanMode } from "@/lib/contract";
 import { SUGGESTIONS, useStore } from "@/lib/store";
+import { SearchIcon } from "./icons";
 
 const MODES: { id: PlanMode; label: string; button: string }[] = [
   { id: "prompt", label: "What if…", button: "Build it" },
@@ -19,25 +20,21 @@ export function CommandBar() {
   const current = MODES.find((m) => m.id === mode)!;
 
   return (
-    <section className="panel command" aria-label="Plan input">
-      <div className="row gap-sm" role="group" aria-label="Input type">
-        {MODES.map((m) => (
-          <button key={m.id} className="btn btn-toggle" aria-pressed={mode === m.id} onClick={() => setInputMode(m.id)}>
-            {m.label}
-          </button>
-        ))}
-      </div>
+    <section className="search surface" aria-label="Plan input">
       <form
-        className="row gap-sm"
+        className="search-row"
         onSubmit={(e) => {
           e.preventDefault();
           build();
         }}
       >
+        <span className="search-icon">
+          <SearchIcon />
+        </span>
         <textarea
-          className="input grow"
+          className="search-input"
           aria-label="Your plan"
-          rows={mode === "article" ? 4 : 1}
+          rows={mode === "article" ? 5 : 1}
           value={text}
           onChange={(e) => set({ text: e.target.value })}
           onKeyDown={(e) => {
@@ -47,18 +44,28 @@ export function CommandBar() {
             }
           }}
         />
-        <button className="btn btn-primary" type="submit" disabled={busy || !text.trim()}>
+        <button className="btn-go" type="submit" disabled={busy || !text.trim()}>
           {busy ? "Working…" : current.button}
         </button>
       </form>
+      <div className="seg search-modes" role="group" aria-label="Input type">
+        {MODES.map((m) => (
+          <button key={m.id} className="seg-btn" aria-pressed={mode === m.id} onClick={() => setInputMode(m.id)}>
+            {m.label}
+          </button>
+        ))}
+      </div>
       {mode === "prompt" && (
-        <div className="row gap-sm wrap">
+        <ul className="search-suggest list">
           {SUGGESTIONS.map((s) => (
-            <button key={s} className="btn btn-chip" onClick={() => set({ text: s })}>
-              {s}
-            </button>
+            <li key={s}>
+              <button className="suggest" onClick={() => set({ text: s })}>
+                <SearchIcon />
+                {s}
+              </button>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </section>
   );

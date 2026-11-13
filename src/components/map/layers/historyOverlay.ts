@@ -2,13 +2,13 @@
 import { PathLayer, PolygonLayer } from "@deck.gl/layers";
 import type { HistoryOverlay, LngLat, Network, OverlayFeature } from "@/lib/contract";
 import { MAP_COLORS, withAlpha } from "../colors";
-import { overlayParameters } from "./common";
+import { overlayProps } from "./common";
 
 export function historyOverlayLayers(network: Network, overlay: HistoryOverlay, photoreal: boolean) {
   const feats = network.overlays.filter((f) => f.overlay === overlay);
   const polys = feats.filter((f) => f.geometry.type === "polygon");
   const paths = feats.filter((f) => f.geometry.type === "path");
-  const parameters = overlayParameters(photoreal);
+  const onTerrain = overlayProps(photoreal);
   return [
     new PolygonLayer<OverlayFeature>({
       id: `history-${overlay}-polygons`,
@@ -19,7 +19,7 @@ export function historyOverlayLayers(network: Network, overlay: HistoryOverlay, 
       lineWidthMinPixels: 1.5,
       stroked: true,
       pickable: true,
-      parameters,
+      ...onTerrain,
     }),
     new PathLayer<OverlayFeature>({
       id: `history-${overlay}-paths`,
@@ -30,7 +30,7 @@ export function historyOverlayLayers(network: Network, overlay: HistoryOverlay, 
       widthUnits: "pixels",
       capRounded: true,
       pickable: true,
-      parameters,
+      ...onTerrain,
     }),
   ];
 }

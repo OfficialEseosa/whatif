@@ -31,13 +31,13 @@ export function WhoPaysPane({
         ))}
       </ul>
       <div className="stack-sm">
-        <div className="eyebrow">Approval from {a.basis.toLocaleString("en-US")} stake scores</div>
+        <h3 className="eyebrow">Approval from {a.basis.toLocaleString("en-US")} stake scores</h3>
         <div className="bar">
           <i className="bar-gain" style={{ width: pct(a.support) }} />
           <i className="bar-loss" style={{ width: pct(a.oppose) }} />
         </div>
         <p className="small">
-          {pct(a.support)} support · {pct(a.oppose)} oppose. <span className="muted">{a.note}</span>
+          {pct(a.support)} support, {pct(a.oppose)} oppose. <span className="muted">{a.note}</span>
         </p>
       </div>
     </div>

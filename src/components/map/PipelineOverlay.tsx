@@ -1,16 +1,17 @@
 "use client";
 import { useStore } from "@/lib/store";
+import { CheckIcon } from "../icons";
 
-const MARK = { pending: "·", active: "›", done: "✓" } as const;
-
+/** Steps of the current build, shown in the results card while it runs. */
 export function PipelineOverlay() {
   const steps = useStore((s) => s.pipeline);
   if (!steps.length) return null;
   return (
-    <ol className="map-ui map-ui-tl panel-float mono small list" aria-live="polite" aria-label="Pipeline progress">
+    <ol className="pipeline list" aria-live="polite" aria-label="Build progress">
       {steps.map((s) => (
         <li key={s.id} className={`pipeline-step is-${s.status}`}>
-          {MARK[s.status]} {s.label}
+          <span className="pipeline-mark">{s.status === "done" && <CheckIcon />}</span>
+          {s.label}
         </li>
       ))}
     </ol>

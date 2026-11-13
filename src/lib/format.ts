@@ -34,3 +34,22 @@ export function clock(sec: number): string {
 }
 
 export const pct = (x: number) => `${Math.round(x * 100)}%`;
+
+/** 33.762, -84.374 -> 33°45'43"N 84°22'26"W. */
+export function dms(lat: number, lng: number): string {
+  const part = (v: number, pos: string, neg: string) => {
+    const a = Math.abs(v);
+    const d = Math.floor(a);
+    const m = Math.floor((a - d) * 60);
+    const sec = Math.floor(((a - d) * 60 - m) * 60);
+    return `${d}°${String(m).padStart(2, "0")}'${String(sec).padStart(2, "0")}"${v >= 0 ? pos : neg}`;
+  };
+  return `${part(lat, "N", "S")} ${part(lng, "E", "W")}`;
+}
+
+/** Height of the camera above the ground for a deck.gl web-mercator view (512 px tiles, altitude 1.5). */
+export function eyeAltitude(v: { latitude: number; zoom: number; pitch: number; height: number }): string {
+  const metersPerPixel = (78271.517 * Math.cos((v.latitude * Math.PI) / 180)) / 2 ** v.zoom;
+  const m = 1.5 * v.height * metersPerPixel * Math.cos((v.pitch * Math.PI) / 180);
+  return m >= 10000 ? `${Math.round(m / 1000).toLocaleString("en-US")} km` : `${(Math.round(m / 10) * 10).toLocaleString("en-US")} m`;
+}

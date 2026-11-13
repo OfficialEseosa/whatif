@@ -2,7 +2,7 @@
 import { PolygonLayer } from "@deck.gl/layers";
 import type { TractEffect } from "@/lib/contract";
 import { MAP_COLORS, withAlpha } from "../colors";
-import { overlayParameters } from "./common";
+import { overlayProps } from "./common";
 
 export function tractsLayer(tracts: TractEffect[], opts: { opacity: number; photoreal: boolean }) {
   return new PolygonLayer<TractEffect>({
@@ -13,6 +13,6 @@ export function tractsLayer(tracts: TractEffect[], opts: { opacity: number; phot
     stroked: false,
     opacity: opts.opacity,
     pickable: true,
-    parameters: overlayParameters(opts.photoreal),
+    ...overlayProps(opts.photoreal),
   });
 }

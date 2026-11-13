@@ -28,13 +28,13 @@ export function ImpactPane({ impact, metrics }: { impact: Impact; metrics: Scena
         ))}
       </div>
       <div className="stack-sm">
-        <div className="eyebrow">How corridor commuters travel</div>
+        <h3 className="eyebrow">How corridor commuters travel</h3>
         <SplitBar label="Before" split={impact.modeSplit.before} />
         <SplitBar label="After" split={impact.modeSplit.after} />
         <p className="small muted">{impact.modeSplit.scope}</p>
       </div>
       <div className="stack-sm">
-        <div className="eyebrow">Minutes saved by earnings band</div>
+        <h3 className="eyebrow">Minutes saved by earnings band</h3>
         {impact.minutesSavedByEarnings.map((b) => (
           <div key={b.band} className="bar-row">
             <span className="small">{b.label}</span>
@@ -46,9 +46,9 @@ export function ImpactPane({ impact, metrics }: { impact: Impact; metrics: Scena
         ))}
       </div>
       <div className="stack-sm">
-        <div className="eyebrow">Whole model</div>
+        <h3 className="eyebrow">Whole model</h3>
         <p className="small">
-          Avg commute {metrics.baseline.avgCommuteMin} → {metrics.proposed.avgCommuteMin} min · transit share {pct(metrics.baseline.transitShare)} →{" "}
+          Avg commute {metrics.baseline.avgCommuteMin} → {metrics.proposed.avgCommuteMin} min, transit share {pct(metrics.baseline.transitShare)} →{" "}
           {pct(metrics.proposed.transitShare)}
         </p>
       </div>

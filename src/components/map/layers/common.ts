@@ -1,12 +1,17 @@
 /** Shared helpers for layer modules. */
 import type { LngLat } from "@/lib/contract";
 
+/** Height of the ground in Google's 3D tiles around central Atlanta, in meters above the WGS84 ellipsoid (approximate). */
+export const GROUND_Z = 275;
+const LIFT = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, GROUND_Z, 1]);
+
 /**
- * In the photoreal view our flat (z = 0) overlays would sit under Google's terrain/buildings,
- * so draw them on top of everything. TODO(Prosper): drape properly (elevation offset) if wanted.
+ * Over Google's photoreal 3D tiles our flat (z = 0) overlays would sit under the terrain and buildings,
+ * so lift them to ground height and draw them on top of everything.
+ * TODO(Prosper): drape properly (TerrainExtension) if the single ground height isn't close enough.
  */
-export const overlayParameters = (photoreal: boolean) =>
-  photoreal ? ({ depthCompare: "always", depthWriteEnabled: false } as const) : undefined;
+export const overlayProps = (onTerrain: boolean) =>
+  onTerrain ? { parameters: { depthCompare: "always" as const, depthWriteEnabled: false }, modelMatrix: LIFT } : {};
 
 export const lengthKm = (a: LngLat, b: LngLat) => Math.hypot((a[0] - b[0]) * 92.57, (a[1] - b[1]) * 111.0);
 

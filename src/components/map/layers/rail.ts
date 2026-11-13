@@ -2,13 +2,13 @@
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import type { LngLat, Network, RailKind, Station } from "@/lib/contract";
 import { MAP_COLORS } from "../colors";
-import { overlayParameters } from "./common";
+import { overlayProps } from "./common";
 
 type Seg = { path: LngLat[]; kind: RailKind };
 
 export function railLayers(network: Network, photoreal: boolean) {
   const segs: Seg[] = network.rail.flatMap((l) => l.paths.map((path) => ({ path, kind: l.kind })));
-  const parameters = overlayParameters(photoreal);
+  const onTerrain = overlayProps(photoreal);
   return [
     new PathLayer<Seg>({
       id: "rail",
@@ -19,7 +19,7 @@ export function railLayers(network: Network, photoreal: boolean) {
       widthUnits: "pixels",
       capRounded: true,
       jointRounded: true,
-      parameters,
+      ...onTerrain,
     }),
     new ScatterplotLayer<Station>({
       id: "stations",
@@ -33,7 +33,7 @@ export function railLayers(network: Network, photoreal: boolean) {
       getLineColor: MAP_COLORS.station,
       lineWidthMinPixels: 1.5,
       pickable: true,
-      parameters,
+      ...onTerrain,
     }),
   ];
 }

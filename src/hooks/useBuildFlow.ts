@@ -14,18 +14,23 @@ const STEPS: PipelineStep[] = [
   { id: "draw", label: "Drawing the line", status: "pending" },
 ];
 
-/** Fit the camera to the proposed line. */
+const BEARING = -20;
+
+/** Fit the camera to the proposed line, shifted so the line sits left of the results card on wide screens. */
 function cameraFor(result: ScenarioResult, photoreal: boolean) {
   const pts = result.line.path.length ? result.line.path : result.agents.slice(0, 50).map((a) => a.home);
   const lng = pts.map((p) => p[0]);
   const lat = pts.map((p) => p[1]);
   const span = Math.max(Math.max(...lng) - Math.min(...lng), Math.max(...lat) - Math.min(...lat), 0.005);
+  // Move the camera target toward screen-right, which slides the line toward screen-left.
+  const shift = typeof window !== "undefined" && window.innerWidth > 900 ? span * 0.4 : 0;
+  const b = (BEARING * Math.PI) / 180;
   return {
-    longitude: (Math.max(...lng) + Math.min(...lng)) / 2,
-    latitude: (Math.max(...lat) + Math.min(...lat)) / 2,
+    longitude: (Math.max(...lng) + Math.min(...lng)) / 2 + shift * Math.cos(b),
+    latitude: (Math.max(...lat) + Math.min(...lat)) / 2 - shift * Math.sin(b) * 0.83,
     zoom: Math.min(16, Math.log2(0.6 / span) + 9.3),
     pitch: photoreal ? 60 : 50,
-    bearing: -20,
+    bearing: BEARING,
     transitionDuration: 1800,
   };
 }
