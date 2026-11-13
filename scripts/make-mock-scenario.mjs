@@ -475,7 +475,9 @@ const gainedMin = -gains.reduce((s, a) => s + a.stake.minutesDelta, 0);
 const redlinedTracts = new Set(tracts.filter((t) => t.redlined).map((t) => t.id));
 const redlinedShare = gainedMin ? -gains.filter((a) => redlinedTracts.has(a.tractId)).reduce((s, a) => s + a.stake.minutesDelta, 0) / gainedMin : 0;
 const pressureHouseholds = Math.round(tracts.filter((t) => t.rentPressure).reduce((s, t) => s + t.households * t.renterShare, 0));
-const lineDailyRiders = Math.round(switchers.length * SCALE * 2); // two trips a day
+// The display sample over-weights corridor homes, so scale line riders down (placeholder factor).
+const CORRIDOR_OVERSAMPLE = 0.5;
+const lineDailyRiders = Math.round(switchers.length * SCALE * CORRIDOR_OVERSAMPLE);
 const costPerRider = (CAPITAL_USD / 20 + OPEX_USD_YR) / (Math.max(1, lineDailyRiders) * 255);
 const timeSavedHrs = Math.round(totalSavedMin / 60);
 const newRidersDay = Math.round(newRiders.length * SCALE);
