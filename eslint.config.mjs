@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Python sim lane and generated data
+    "sim/**",
+    "scripts/data/**",
+    "public/scenarios/**",
   ]),
 ]);
 
