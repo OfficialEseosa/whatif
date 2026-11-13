@@ -73,6 +73,7 @@ export default function DeckMap() {
   const underground = useStore((s) => s.underground);
   const quality3d = useStore((s) => s.quality3d);
   const vis = useStore((s) => s.layerVisibility);
+  const playbackSpeed = useStore((s) => s.playbackSpeed);
   const headways = useStore((s) => s.headways);
   // Zoom drives the vehicle-model size exaggeration; quantized so it doesn't re-render on every zoom tick.
   const zoomQ = useStore((s) => Math.round(s.live.zoom * 4) / 4);
@@ -85,6 +86,19 @@ export default function DeckMap() {
   const [session, setSession] = useState<string | null>(null);
   const [credits3d, setCredits3d] = useState("");
   const [credits2d, setCredits2d] = useState("");
+  // Google Earth keys: N = north up, U = level the tilt, R = reset view (ignored while typing).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.ctrlKey || e.metaKey || e.altKey || (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))) return;
+      const st = useStore.getState();
+      if (e.key === "n" || e.key === "N") st.nudgeCamera({ bearing: 0, ms: 400 });
+      else if (e.key === "u" || e.key === "U") st.nudgeCamera({ pitch: 0, ms: 400 });
+      else if (e.key === "r" || e.key === "R") st.flyTo(INITIAL_CAMERA, 1200);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   // 3D vehicle models: used when the .glb files are reachable, else the flat markers.
   const [modelsOk, setModelsOk] = useState(false);
   useEffect(() => {
@@ -137,7 +151,9 @@ export default function DeckMap() {
     setIvs({
       ...next,
       position: [0, 0, threeD ? PHOTOREAL_TARGET_Z : 0],
-      transitionDuration: ms,
+      // Always go through deck.gl's transition manager (even "instant" moves take 1 ms): an untransitioned
+      // initialViewState change left the controller's own state behind, so the next wheel/drag jumped back.
+      transitionDuration: Math.max(1, ms),
       transitionInterpolator: new FlyToInterpolator(),
     });
   }, []);
@@ -229,7 +245,7 @@ export default function DeckMap() {
   if (vis.rentPressure && built && scenario) layers.push(...rentPressureLayers(scenario.tracts, p3d));
   if (vis.proposedLine && geom) layers.push(...proposedLineLayers(geom, lineProgress, p3d));
   layers.push(...useRunPingLayers(p3d)); // run panel: stop pings, schematic line, hovered stop
-  if (vis.commuters && tripData.length && !underground) layers.push(tripsLayer(tripData, time, p3d));
+  if (vis.commuters && tripData.length && !underground) layers.push(tripsLayer(tripData, time, p3d, playbackSpeed));
   // vehicles: existing rail (per its toggle) and the proposed line once it has finished drawing
   if (vis.vehicles) {
     const chains = railChains.filter((c) => (c.kind === "streetcar" ? vis.streetcar : vis.martaRail));
@@ -270,7 +286,7 @@ export default function DeckMap() {
             useStore.getState().set({ live: { longitude: m.longitude, latitude: m.latitude, zoom: m.zoom, pitch: m.pitch ?? 0, bearing: m.bearing ?? 0, height: m.height || window.innerHeight } });
           }, LIVE_PUBLISH_MS);
         }}
-        controller={controllerProps(p3d)}
+        controller={controllerProps()}
         layers={finalLayers}
         effects={[LIGHTING]}
         getTooltip={tooltip}

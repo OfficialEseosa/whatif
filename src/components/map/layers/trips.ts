@@ -24,7 +24,8 @@ export function buildTripData(agents: Agent[], switchStep: number, horizon: Hori
   });
 }
 
-export function tripsLayer(data: TripDatum[], currentTime: number, photoreal: boolean) {
+/** `playbackSpeed`: simulated seconds per real second. The trail is about one real second long (a uniform; no data rebuild). */
+export function tripsLayer(data: TripDatum[], currentTime: number, photoreal: boolean, playbackSpeed = 240) {
   return new TripsLayer<TripDatum>({
     id: "trips",
     data,
@@ -34,7 +35,7 @@ export function tripsLayer(data: TripDatum[], currentTime: number, photoreal: bo
     widthMinPixels: photoreal ? 3.5 : 2.5,
     capRounded: true,
     jointRounded: true,
-    trailLength: 240,
+    trailLength: Math.max(60, playbackSpeed),
     fadeTrail: true,
     currentTime,
     updateTriggers: { getPath: photoreal },

@@ -26,7 +26,8 @@ export async function GET() {
   const res = await fetch(`https://tile.googleapis.com/v1/createSession?key=${encodeURIComponent(key)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mapType: "roadmap", language: "en-US", region: "US", styles: DARK_STYLE }),
+    // scaleFactor2x + highDpi: 512 px images for the same 256 px tile footprint (crisp labels on high-DPI screens).
+    body: JSON.stringify({ mapType: "roadmap", language: "en-US", region: "US", scale: "scaleFactor2x", highDpi: true, styles: DARK_STYLE }),
   });
   if (!res.ok) return apiError(502, `createSession failed (${res.status})`);
   const json = (await res.json()) as { session: string; expiry: string };

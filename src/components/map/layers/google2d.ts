@@ -1,6 +1,7 @@
 /**
- * Google Map Tiles API 2D roadmap tiles (Analysis view when a key is present).
- * Session token comes from /api/map-session. UNTESTED without a key.
+ * Google Map Tiles API 2D roadmap tiles (Map view when a key is present).
+ * Session token comes from /api/map-session. The layer instance is memoized in DeckMap (stable id and
+ * URL), so its tile cache survives re-renders.
  */
 import { TileLayer } from "@deck.gl/geo-layers";
 import { BitmapLayer } from "@deck.gl/layers";
@@ -11,8 +12,16 @@ export function google2dLayer(session: string, key: string, opacity = 1) {
     data: `https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?session=${encodeURIComponent(session)}&key=${encodeURIComponent(key)}`,
     minZoom: 0,
     maxZoom: 22,
-    tileSize: 256,
+    tileSize: 256, // logical size; the session requests 2x high-DPI images so text stays crisp at DPR 1.75
     opacity,
+    // Keep whatever is loaded (parents/children) on screen until the new tiles arrive: no blank flashes.
+    refinementStrategy: "best-available",
+    // Keep a few hundred small tiles in memory so zooming/panning back doesn't re-fetch (the browser
+    // HTTP cache covers the rest: same URL, same session).
+    maxCacheSize: 600,
+    maxRequests: 12,
+    // Wait until a wheel/drag gesture settles before requesting new tiles; parents scale meanwhile.
+    debounceTime: 80,
     renderSubLayers: (props) => {
       const { boundingBox } = props.tile;
       return new BitmapLayer(props, {
