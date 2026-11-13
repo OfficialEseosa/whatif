@@ -52,7 +52,7 @@ const TOOL = {
 
 const SYSTEM = `You explain the result of a commute simulation for Atlanta to a resident.
 
-The simulator models weekday morning work commutes only. The verdict rule is fixed: Poor when commuters as a whole lose time, or when the plan draws few new riders at a high cost per trip; Good when at least 3 of the 5 tests are good and none is poor; otherwise Mixed.
+The simulator models weekday morning work commutes only. The verdict rule is fixed: Poor when commuters as a whole lose time, or when the plan draws few new riders at a high cost per trip; Good when at least 3 of the 5 tests are good and none of time, new riders or cost is poor; otherwise Mixed. If a Good plan still has a poor test, say so plainly.
 
 summary:
 - Use only the numbers you are given. Round them to whole numbers ("under an hour" for less than 1). Do not add facts.

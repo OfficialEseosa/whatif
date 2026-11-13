@@ -2,7 +2,7 @@
 import { useEffect } from "react";
 import { useBuildFlow } from "@/hooks/useBuildFlow";
 import { DEFAULT_TEXT, selectActiveRun, useStore, type RunRecord } from "@/lib/store";
-import { isMockSection, scenarioSource } from "@/lib/provenance";
+import { isMockSection } from "@/lib/provenance";
 import type { LngLat, ScenarioSource } from "@/lib/contract";
 import { ChevronDownIcon, CloseIcon } from "../icons";
 import { focusComposer, useUi, type UiTab } from "../uiStore";
@@ -67,7 +67,6 @@ function Card() {
   const v = scenario.verdict;
   const grade = VERDICT_GRADE[v.label];
   const reason = verdictReason(v);
-  const source = scenarioSource(scenario);
   const hasClaims = scenario.claims.length > 0;
   // The footer names where the verdict and tests came from. Placeholder parts of the breakdown carry their own tags.
   const anyMock = scenario.isMock;
@@ -109,9 +108,14 @@ function Card() {
       </div>
 
       <div className="results-foot">
-        <span className={`source source-${anyMock ? "mock" : source}`} title={SOURCE_HINT[anyMock ? "mock" : source]}>
-          {SOURCE_SHORT[anyMock ? "mock" : source]}
-        </span>
+        {/* A real run says nothing here. Only a result made entirely of placeholder numbers is labelled. */}
+        {anyMock ? (
+          <span className="source source-mock" title={SOURCE_HINT.mock}>
+            {SOURCE_SHORT.mock}
+          </span>
+        ) : (
+          <span />
+        )}
         <button className="btn details-btn" aria-expanded={details} onClick={() => setUi({ details: !details })}>
           {details ? "Hide breakdown" : "See the full breakdown"}
           <ChevronDownIcon />

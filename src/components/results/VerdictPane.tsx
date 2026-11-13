@@ -67,11 +67,12 @@ export function verdictReason(v: Verdict): string | null {
   const count = (g: VerdictTest["grade"]) => v.tests.filter((t) => t.grade === g).length;
   const timePoor = by.time_saved?.grade === "poor";
   const costPoor = by.new_riders?.grade === "poor" && by.cost_per_rider?.grade === "poor" && !notScored(by.cost_per_rider);
-  const rule = timePoor || costPoor ? "poor" : count("good") >= 3 && count("poor") === 0 ? "good" : "mixed";
+  const corePoor = [by.time_saved, by.new_riders, by.cost_per_rider].some((t) => t?.grade === "poor");
+  const rule = timePoor || costPoor ? "poor" : count("good") >= 3 && !corePoor ? "good" : "mixed";
   if (rule !== v.label) return null;
   if (timePoor) return "Poor because commuters lose time overall.";
   if (costPoor) return "Poor because it draws few new riders at a high cost per trip.";
-  if (rule === "good") return `Good because ${count("good")} of the 5 tests are good and none is poor.`;
+  if (rule === "good") return `Good because ${count("good")} of the 5 tests are good, and time, riders and cost all hold up.`;
   const split = (["good", "fair", "poor"] as const).filter((g) => count(g) > 0).map((g) => `${count(g)} ${g}`);
   return `Mixed because the tests split: ${split.join(", ")}.`;
 }

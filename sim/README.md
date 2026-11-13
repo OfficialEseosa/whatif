@@ -214,14 +214,14 @@ plan, so its five tests are 0 and graded "fair" with sublabel "Baseline - no pla
 
 | Test | Value | good | fair | poor | Constant(s) |
 |---|---|---|---|---|---|
-| `time_saved` | net commuter-hours/weekday, all modeled commuters | >= 500 | 0 to 500 | < 0 (any net loss) | `TIME_SAVED_GOOD_HRS`, `TIME_SAVED_FAIR_HRS` |
+| `time_saved` | net commuter-hours/weekday, all modeled commuters | >= 300 | 0 to 300 | < 0 (any net loss) | `TIME_SAVED_GOOD_HRS`, `TIME_SAVED_FAIR_HRS` |
 | `new_riders` | commuters/day switching to transit (work trips only) | >= 3,000 | >= 1,000 | < 1,000 | `NEW_RIDERS_GOOD`, `NEW_RIDERS_FAIR` |
 | `cost_per_rider` | mid capital cost / (new riders x 2 trips x 250 days x 20 yrs) | < $6 | < $15 | >= $15 | `COST_PER_TRIP_*`; breakpoints borrowed from FTA CIG cost-effectiveness (FAST Act interim policy guidance, June 2016: High < $4, Med-High $4-5.99, Medium $6-9.99, Med-Low $10-14.99, Low >= $15). FTA's measure is annual capital + O&M per project trip, so this is a looser comparison |
 | `redlined_benefit_share` | share of positive time gains going to residents of redlined tracts | >= their share of modeled commuters | >= 0.5 x that share | below, or no gains at all | `REDLINED_FAIR_RATIO` |
 | `renters_rent_pressure` | renter households within 800 m of new stops in rent-pressure tracts | <= 250 | <= 1,000 | > 1,000 | `RENTERS_GOOD_MAX`, `RENTERS_FAIR_MAX` |
 
 **Verdict label rule:** `poor` if `time_saved` is poor, or if `new_riders` and `cost_per_rider` are both poor;
-`good` if >= 3 tests are good and none is poor; otherwise `mixed`. Headline and summary are fixed sentence
+`good` if >= 3 tests are good and none of time, ridership or cost is poor (a poor equity test is shown but does not veto); otherwise `mixed`. Headline and summary are fixed sentence
 templates filled with the numbers (including negative or negligible results) and state the work-trips-only limit.
 
 **Capital cost (ESTIMATE, `costs.py`)** - per-mile benchmarks, nominal year-of-expenditure dollars, no

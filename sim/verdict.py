@@ -14,7 +14,7 @@ import equity as eqm
 
 # ---- GRADE THRESHOLDS (judgment calls unless a source is named) --------------
 # time_saved, commuter-hours per weekday (net, all modeled commuters). A net loss is poor.
-TIME_SAVED_GOOD_HRS = 500.0
+TIME_SAVED_GOOD_HRS = 300.0
 TIME_SAVED_FAIR_HRS = 0.0           # >= 0 and < GOOD is fair; < 0 is poor
 # new_riders, commuters per weekday who switch to transit (work trips only).
 NEW_RIDERS_GOOD = 3000.0
@@ -178,11 +178,13 @@ def assess(base, prun, edit, line, riders_on_line, metrics_b, metrics_p, roads, 
         n_good = sum(g == "good" for g in grades.values())
         n_poor = sum(g == "poor" for g in grades.values())
         # RULE: poor if time is a net loss or both ridership and cost-effectiveness are poor;
-        # good if >= 3 tests good and none poor; otherwise mixed.
+        # good if >= 3 tests good and none of time, ridership or cost is poor; otherwise mixed.
+        # A poor equity test (redlined share, rent pressure) stays visible in the list but does not veto.
+        core_poor = any(grades[k] == "poor" for k in ("time_saved", "new_riders", "cost_per_rider"))
         if grades["time_saved"] == "poor" or (grades["new_riders"] == "poor" and grades["cost_per_rider"] == "poor"
                                               and cpt is not None):
             label = "poor"
-        elif n_good >= 3 and n_poor == 0:
+        elif n_good >= 3 and not core_poor:
             label = "good"
         else:
             label = "mixed"
