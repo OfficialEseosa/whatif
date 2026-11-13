@@ -66,6 +66,7 @@ class Demand:
     od: pd.DataFrame          # o, d (zone index), jobs, peak_trips
     total_jobs_in_box: int    # all in-box home+work jobs incl. intrazonal
     intrazonal_jobs: int      # same block group home & work (not assigned)
+    blocks: pd.DataFrame | None = None  # block, bg, lng, lat, home_wt, work_wt (display sampling)
 
 
 def build_demand(net) -> Demand:
@@ -82,7 +83,9 @@ def build_demand(net) -> Demand:
     hb = od.groupby("h_geocode").S000.sum()
     wb = od.groupby("w_geocode").S000.sum()
     wts = hb.add(wb, fill_value=0)
-    blk = inb.loc[wts.index].assign(wt=wts.values)
+    blk = inb.loc[wts.index].assign(wt=wts.values,
+                                    home_wt=hb.reindex(wts.index).fillna(0).values,
+                                    work_wt=wb.reindex(wts.index).fillna(0).values)
     blk["bg"] = blk.index.str[:12]
     blk["tract"] = blk.index.str[:11]
     zones = blk.groupby("bg").apply(
@@ -107,7 +110,10 @@ def build_demand(net) -> Demand:
     pairs["peak_trips"] = pairs.jobs * PEAK_HOUR_SHARE
     print(f"demand: {len(zones)} block groups, {len(pairs)} OD pairs, {pairs.jobs.sum():,} commuters "
           f"(+{intra:,} intrazonal not assigned) from LODES {lodes_year()} ({time.time()-t:.1f}s)")
-    return Demand(year=lodes_year(), zones=zones, od=pairs, total_jobs_in_box=total, intrazonal_jobs=intra)
+    blocks = blk.rename_axis("block").reset_index()[["block", "bg", "blklondd", "blklatdd", "home_wt", "work_wt"]].rename(
+        columns={"blklondd": "lng", "blklatdd": "lat"})
+    return Demand(year=lodes_year(), zones=zones, od=pairs, total_jobs_in_box=total, intrazonal_jobs=intra,
+                  blocks=blocks)
 
 
 def snap(net, lng, lat) -> np.ndarray:
@@ -159,5 +165,7 @@ if __name__ == "__main__":
         d = _self.load_demand(load_network(), rebuild=True)
         print(d.zones.head())
         print(f"total in-box jobs {d.total_jobs_in_box:,}; tracts {d.zones.tract.nunique()}")
+
+
 
 
