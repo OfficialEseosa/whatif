@@ -1,0 +1,122 @@
+{
+  "streetcar-east.txt": [
+    {
+      "id": "c1",
+      "quote": "Planners say the line could carry 10,000 riders a day once it opens",
+      "metric": "daily_riders",
+      "claimedValue": 10000
+    },
+    {
+      "id": "c2",
+      "quote": "and that trains would run every 10 minutes during the morning rush",
+      "metric": "headway_min",
+      "claimedValue": 10
+    },
+    {
+      "id": "c3",
+      "quote": "The extension would be built for about $190 million",
+      "metric": "capital_cost_usd",
+      "claimedValue": 190000000
+    },
+    {
+      "id": "c4",
+      "quote": "Officials estimate the cost works out to roughly $5.50 per rider over twenty years",
+      "metric": "cost_per_rider",
+      "claimedValue": 5.5
+    },
+    {
+      "id": "c5",
+      "quote": "the line would save commuters in the Old Fourth Ward about 12 minutes each way and",
+      "metric": "trip_minutes_saved",
+      "claimedValue": 12
+    },
+    {
+      "id": "c6",
+      "quote": "each way and take cars off Ponce de Leon",
+      "metric": "traffic"
+    }
+  ],
+  "brt-campbellton.txt": [
+    {
+      "id": "c1",
+      "quote": "line would cost $85 million to build and",
+      "metric": "capital_cost_usd",
+      "claimedValue": 85000000
+    },
+    {
+      "id": "c2",
+      "quote": "Staff projected 8,500 daily riders by the third year of service",
+      "metric": "daily_riders",
+      "claimedValue": 8500
+    },
+    {
+      "id": "c3",
+      "quote": "A survey commissioned by the agency found that 62% of residents along the corridor support the project",
+      "metric": "support_share",
+      "claimedValue": 0.62
+    },
+    {
+      "id": "c4",
+      "quote": "while 21% oppose it",
+      "metric": "oppose_share",
+      "claimedValue": 0.21
+    },
+    {
+      "id": "c5",
+      "quote": "Staff also said the dedicated lanes could cut congestion on Campbellton Road by 20% in the peak hour",
+      "metric": "traffic",
+      "claimedValue": 0.2
+    },
+    {
+      "id": "c6",
+      "quote": "and that the line would save riders a combined 1,900 person-hours per weekday",
+      "metric": "time_saved",
+      "claimedValue": 1900
+    }
+  ],
+  "clifton-rail.txt": [
+    {
+      "id": "c1",
+      "quote": "rail would pull 4,000 new riders A consultant's study",
+      "metric": "new_riders",
+      "claimedValue": 4000
+    },
+    {
+      "id": "c2",
+      "quote": "line would add 4,000 new daily riders and lift transit's",
+      "metric": "new_riders",
+      "claimedValue": 4000
+    },
+    {
+      "id": "c3",
+      "quote": "000 new daily riders and lift transit's share of commutes in the corridor from 30% to 35%",
+      "metric": "transit_share",
+      "claimedValue": 0.35
+    },
+    {
+      "id": "c4",
+      "quote": "The average commute for residents along the route would fall to 24 minutes",
+      "metric": "avg_commute_min",
+      "claimedValue": 24
+    },
+    {
+      "id": "c5",
+      "quote": "$2.1 billion before financing",
+      "metric": "capital_cost_usd",
+      "claimedValue": 2100000000
+    },
+    {
+      "id": "c6",
+      "quote": "The study also warns that 1,100 renter households near the stations could be priced out within a decade",
+      "metric": "renters_rent_pressure",
+      "claimedValue": 1100
+    },
+    {
+      "id": "c7",
+      "quote": "and that only 18% of the travel-time benefit would reach formerly redlined neighborhoods",
+      "metric": "redlined_benefit_share",
+      "claimedValue": 0.18
+    }
+  ],
+  "no-claims.txt": []
+}

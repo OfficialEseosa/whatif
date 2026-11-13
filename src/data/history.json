@@ -5,8 +5,8 @@
     "yearLabel": "1938",
     "title": "HOLC redlining map of Atlanta",
     "body": "Federal Home Owners' Loan Corporation appraisers grade Atlanta neighborhoods A–D. Grade D areas are marked hazardous for lending.",
-    "source": "Mapping Inequality, University of Richmond Digital Scholarship Lab",
-    "sourceUrl": "https://dsl.richmond.edu/panorama/redlining/",
+    "source": "Mapping Inequality, University of Richmond Digital Scholarship Lab; Rhodes (2017), Atlanta Studies",
+    "sourceUrl": "https://dsl.richmond.edu/panorama/redlining/map/GA/Atlanta",
     "verified": false,
     "overlay": "redline",
     "note": "HOLC grade D areas. Shapes are placeholders until the Mapping Inequality GeoJSON is loaded."
@@ -17,7 +17,8 @@
     "yearLabel": "1950s–60s",
     "title": "Highways as racial barriers",
     "body": "The Downtown Connector is built through Sweet Auburn, and I-20 is routed along a line between white and Black neighborhoods.",
-    "source": "Bayor, Race and the Shaping of Twentieth-Century Atlanta; Kruse, White Flight",
+    "source": "Bayor, Race and the Shaping of Twentieth-Century Atlanta; Kruse, White Flight; Smart Growth America, Divided by Design: Atlanta's story (2023)",
+    "sourceUrl": "https://www.smartgrowthamerica.org/signature-reports/divided-by-design/atlantas-story/",
     "verified": false,
     "overlay": "highway",
     "note": "Interstates highlighted. Scenario spillover often lands near these same corridors."
@@ -28,7 +29,8 @@
     "yearLabel": "1962",
     "title": "Peyton Road barricades",
     "body": "The city puts up barricades on Peyton Road in southwest Atlanta to block Black families from moving into a white neighborhood.",
-    "source": "Kruse, White Flight",
+    "source": "Kruse, White Flight; Atlanta History Center, \"Atlanta's Berlin Wall\" (2021)",
+    "sourceUrl": "https://www.atlantahistorycenter.com/blog/atlantas-berlin-wall/",
     "verified": false,
     "overlay": "highway",
     "note": "Outside the current map box; included for the town hall's historical context."
@@ -39,8 +41,8 @@
     "yearLabel": "1950s–70s",
     "title": "Urban renewal displacement",
     "body": "Federal urban renewal projects clear neighborhoods near downtown and displace thousands of families.",
-    "source": "Renewing Inequality, University of Richmond Digital Scholarship Lab",
-    "sourceUrl": "https://dsl.richmond.edu/panorama/renewal/",
+    "source": "Renewing Inequality, University of Richmond Digital Scholarship Lab (Atlanta, GA)",
+    "sourceUrl": "https://dsl.richmond.edu/panorama/renewal/#view=0/0/1&viz=cartogram&city=atlantaGA",
     "verified": false,
     "overlay": "renewal",
     "note": "Urban renewal project areas. Shapes are placeholders until the Renewing Inequality data is loaded."
@@ -51,7 +53,8 @@
     "yearLabel": "1965",
     "title": "Cobb County votes against joining MARTA",
     "body": "Cobb County voters decline to join the new regional transit authority.",
-    "source": "MARTA history; news archives",
+    "source": "Hatfield, \"A Well-Tied Knot: Atlanta's Mobility Crisis and the 2012 T-SPLOST Debate\", Southern Spaces (2013)",
+    "sourceUrl": "https://southernspaces.org/2013/well-tied-knot-atlantas-mobility-crisis-and-2012-t-splost-debate/",
     "verified": false,
     "overlay": "county",
     "note": "County lines (approximate). Verify the year and the margin before the demo."
@@ -62,7 +65,8 @@
     "yearLabel": "1968",
     "title": "First MARTA funding referendum fails",
     "body": "The first referendum to fund MARTA rail fails.",
-    "source": "MARTA history; news archives",
+    "source": "Toon, \"Metropolitan Atlanta Rapid Transit Authority (MARTA)\", New Georgia Encyclopedia (2003, rev. 2021)",
+    "sourceUrl": "https://www.georgiaencyclopedia.org/articles/business-economy/metropolitan-atlanta-rapid-transit-authority-marta/",
     "verified": false,
     "overlay": "county",
     "note": "County lines (approximate). Verify the result before the demo."
@@ -73,7 +77,8 @@
     "yearLabel": "1971",
     "title": "Fulton and DeKalb vote yes; Clayton and Gwinnett vote no",
     "body": "The 1971 referendum passes in Fulton and DeKalb and fails in Clayton and Gwinnett, so the rail system is built in two counties.",
-    "source": "MARTA history; news archives",
+    "source": "Toon, \"Metropolitan Atlanta Rapid Transit Authority (MARTA)\", New Georgia Encyclopedia (2003, rev. 2021)",
+    "sourceUrl": "https://www.georgiaencyclopedia.org/articles/business-economy/metropolitan-atlanta-rapid-transit-authority-marta/",
     "verified": false,
     "overlay": "county",
     "note": "The rail lines stop at the county lines set by this vote. Margins still to verify."
@@ -84,7 +89,8 @@
     "yearLabel": "2014",
     "title": "Clayton County joins MARTA",
     "body": "Clayton County voters approve joining MARTA.",
-    "source": "MARTA history; news coverage",
+    "source": "Simmons, \"Clayton voters embrace MARTA\", Atlanta Journal-Constitution (Nov. 5, 2014)",
+    "sourceUrl": "https://www.ajc.com/news/transportation/clayton-voters-embrace-marta/zw2QmL6FuxXhAehAOxAbHJ",
     "verified": false,
     "overlay": "county",
     "note": "County lines (approximate)."
@@ -95,20 +101,22 @@
     "yearLabel": "2019–20",
     "title": "Gwinnett votes no again",
     "body": "Gwinnett County voters reject MARTA expansion in 2019 and a transit plan in 2020.",
-    "source": "News coverage, 2019 and 2020",
+    "source": "Estep, \"MARTA in Gwinnett: Why the referendum failed\", AJC (Mar. 20, 2019); Kass, \"Gwinnett County transit vote fails; recount possible\", AJC (Nov. 9, 2020)",
+    "sourceUrl": "https://www.ajc.com/news/local-govt--politics/marta-gwinnett-why-the-referendum-failed/URnv59pplXA8Cnd9a23tCI",
     "verified": false,
     "overlay": "county",
     "note": "County lines (approximate). Verify results and Cobb's latest transit vote."
   },
   {
     "id": "beltline_prices",
-    "year": 2012,
-    "yearLabel": "2012–18",
+    "year": 2011,
+    "yearLabel": "2011–15",
     "title": "Beltline and rising home prices",
-    "body": "Home values near the Eastside Trail rise faster than elsewhere in the city after it opens.",
-    "source": "Immergluck & Balan (2018), \"Sustainable for whom? Green urban development, environmental gentrification, and the Atlanta Beltline\", Urban Geography",
+    "body": "From 2011 to 2015, home values within a half mile of the Beltline rise 17.9% to 26.6% more than elsewhere in the city, depending on the segment.",
+    "source": "Immergluck & Balan (2018), \"Sustainable for whom? Green urban development, environmental gentrification, and the Atlanta Beltline\", Urban Geography 39(4): 546–562",
+    "sourceUrl": "https://doi.org/10.1080/02723638.2017.1360041",
     "verified": false,
     "overlay": "beltline",
-    "note": "The Beltline's first decade is the evidence base for the Year 5 / Year 10 look-ahead."
+    "note": "Context, not a finding of the paper: the Eastside Trail (the Beltline's first finished section, Piedmont Park to Reynoldstown via Old Fourth Ward and Inman Park, per Atlanta BeltLine Inc.) lies within the area the paper calls its Northeast segment. The Beltline's first decade is the evidence base for the Year 5 / Year 10 look-ahead."
   }
 ]
