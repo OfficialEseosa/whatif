@@ -8,19 +8,25 @@
     "start": "next start",
     "lint": "eslint",
     "mock": "node --no-warnings scripts/make-mock-scenario.mjs",
-    "fetch:osm": "node scripts/fetch-osm.mjs"
+    "fetch:osm": "node scripts/fetch-osm.mjs",
+    "check:api": "node --no-warnings scripts/check-api.mjs",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/setup/register.mjs --test \"tests/**/*.test.ts\""
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "1.6.0",
     "@deck.gl/core": "^9.4.1",
+    "@deck.gl/extensions": "^9.4.1",
     "@deck.gl/geo-layers": "^9.4.1",
     "@deck.gl/layers": "^9.4.1",
     "@deck.gl/mesh-layers": "^9.4.1",
     "@deck.gl/react": "^9.4.1",
     "@loaders.gl/3d-tiles": "^4.5.4",
     "@loaders.gl/core": "^4.5.4",
+    "@loaders.gl/tiles": "^4.5.4",
     "next": "16.4.6",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "server-only": "^0.0.1",
     "zod": "^4.6.7",
     "zustand": "^5.1.0"
   },

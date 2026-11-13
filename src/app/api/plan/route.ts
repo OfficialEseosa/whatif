@@ -1,21 +1,15 @@
-import { fallbackPlan } from "@/lib/ai/plan/fallback";
-import { PlanRequestSchema } from "@/lib/contract";
+// POST /api/plan  { text, mode } -> PlanResponse   (owner: Samuel)
+import { PlanRequestSchema, PlanResponseSchema, checkEditAgainstGazetteer } from "@/lib/contract";
+import { apiError, readBody } from "@/lib/http";
+import { parsePlan } from "@/lib/ai/plan";
+import { gazetteer } from "@/lib/ai/mock";
 
-export async function POST(request: Request) {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return Response.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
-
-  const result = PlanRequestSchema.safeParse(body);
-  if (!result.success) {
-    return Response.json(
-      { error: "Invalid plan request.", issues: result.error.issues },
-      { status: 400 },
-    );
-  }
-
-  return Response.json(fallbackPlan(result.data));
+export async function POST(req: Request) {
+  const [body, err] = await readBody(req, PlanRequestSchema);
+  if (err) return err;
+  const out = PlanResponseSchema.safeParse(await parsePlan(body));
+  if (!out.success) return apiError(502, "plan parser returned an invalid edit", out.error.issues);
+  const problems = checkEditAgainstGazetteer(out.data.edit, gazetteer);
+  if (problems.length) return apiError(422, "edit references places outside the gazetteer", problems);
+  return Response.json(out.data);
 }

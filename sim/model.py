@@ -1,4 +1,4 @@
-"""Glue: run the full model (assignment <-> mode choice) for baseline or a scenario.
+﻿"""Glue: run the full model (assignment <-> mode choice) for baseline or a scenario.
 
 Baseline is computed once and cached to disk; a scenario reuses the network,
 demand and calibrated ASC and only redoes transit skims + assignment.
@@ -69,7 +69,7 @@ def run_model(net, dem, td, capacity, asc: float | None, verbose=True) -> tuple[
     calibrate = asc is None
     p = np.zeros(len(peak))  # first pass: everyone drives
     for k in range(OUTER_LOOPS + 1):
-        asg = assign(net, dem.zones, dem.od, peak * (1 - p), capacity=capacity, verbose=verbose)
+        asg = assign(net, dem, peak * (1 - p), capacity=capacity, verbose=verbose)
         if calibrate:
             asc = calibrate_asc(asg.drive_min, tsk.minutes, jobs)
         p = p_transit(asg.drive_min, tsk.minutes, asc)
@@ -104,3 +104,4 @@ def load_baseline(rebuild=False, verbose=True) -> Baseline:
     with open(BASELINE_CACHE, "wb") as f:
         pickle.dump(b, f)
     return b
+

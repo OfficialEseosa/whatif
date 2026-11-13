@@ -1,4 +1,4 @@
-"""Download all public inputs into sim/data/. Re-runnable: skips files that exist.
+﻿"""Download all public inputs into sim/data/. Re-runnable: skips files that exist.
 
     python fetch_data.py            # everything
     python fetch_data.py --force    # re-download
@@ -9,7 +9,11 @@ Sources (official publishers only):
   - MARTA GTFS (rail, bus, Atlanta Streetcar) from itsmarta.com
   - Census LEHD LODES8 Georgia OD main JT00 (latest year) + GA geography crosswalk
 
-TODO (not needed for the first slice):
+  - Census cartographic boundary tracts (GA, 2023, 1:500k), ACS 5-year 2024 tables
+    B25003 / B19013 / B25064 / B25070 (table-based summary files), HOLC 1938 Atlanta
+    (Mapping Inequality, University of Richmond)
+
+TODO (not needed yet):
   - HPMS Georgia AADT (FHWA) -> background traffic calibration (assign.py)
   - ACS B08301 / B08302 / B08141 -> per-tract mode share + departure-time share
 """
@@ -127,13 +131,22 @@ def fetch_corridors(force: bool) -> None:
     print(f"  -> {config.CORRIDOR_FILE.name}")
 
 
+def fetch_equity(force: bool) -> None:
+    """Tract polygons (Census cartographic boundary), ACS 5-year tables (Census
+    table-based summary files - no API key needed), HOLC 1938 Atlanta (Mapping Inequality)."""
+    download(config.TRACTS_URL, config.TRACTS_FILE, force)
+    download(config.HOLC_URL, config.HOLC_FILE, force)
+    for t in config.ACS_TABLES:
+        download(config.acs_url(t), config.acs_file(t), force)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true")
-    ap.add_argument("--only", choices=["lodes", "gtfs", "osm"], default=None)
+    ap.add_argument("--only", choices=["lodes", "gtfs", "osm", "equity"], default=None)
     args = ap.parse_args()
     config.ensure_dirs()
-    steps = {"gtfs": fetch_gtfs, "lodes": fetch_lodes, "osm": fetch_osm}
+    steps = {"gtfs": fetch_gtfs, "lodes": fetch_lodes, "osm": fetch_osm, "equity": fetch_equity}
     failed = []
     for name, fn in steps.items():
         if args.only and name != args.only:
@@ -151,3 +164,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

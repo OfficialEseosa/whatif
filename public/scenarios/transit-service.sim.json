@@ -1,0 +1,199 @@
+{
+ "source": "MARTA GTFS (https://www.itsmarta.com/google_transit_feed/google_transit.zip), weekday service",
+ "window": "07:00-09:00",
+ "lines": {
+  "marta_north": {
+   "routes": [
+    "RED",
+    "GOLD"
+   ],
+   "tripsPerDirectionAm7to9": [
+    24,
+    23
+   ],
+   "headwayMin": 5.0
+  },
+  "marta_south": {
+   "routes": [
+    "RED",
+    "GOLD"
+   ],
+   "tripsPerDirectionAm7to9": [
+    24,
+    23
+   ],
+   "headwayMin": 5.0
+  },
+  "marta_east": {
+   "routes": [
+    "BLUE",
+    "GREEN"
+   ],
+   "tripsPerDirectionAm7to9": [
+    24,
+    24
+   ],
+   "headwayMin": 5.0
+  },
+  "marta_west": {
+   "routes": [
+    "BLUE",
+    "GREEN"
+   ],
+   "tripsPerDirectionAm7to9": [
+    24,
+    24
+   ],
+   "headwayMin": 5.0
+  },
+  "marta_proctor_creek": {
+   "routes": [
+    "GREEN"
+   ],
+   "tripsPerDirectionAm7to9": [
+    12,
+    12
+   ],
+   "headwayMin": 10.0
+  },
+  "marta_east_west": {
+   "routes": [
+    "BLUE"
+   ],
+   "tripsPerDirectionAm7to9": [
+    12,
+    12
+   ],
+   "headwayMin": 10.0
+  },
+  "atlanta_streetcar": {
+   "routes": [
+    "ATLSC"
+   ],
+   "tripsPerDirectionAm7to9": [
+    3,
+    2
+   ],
+   "headwayMin": 40.0,
+   "note": "Weekday GTFS: first streetcar departure at the reference stop is 08:17 (dir 0), 08:33 (dir 1); median gap between departures 15.0 min, 15.0 min. The 7-9 AM headway is long because service starts mid-morning."
+  }
+ },
+ "routes": {
+  "ATLSC": {
+   "routeId": "29224",
+   "referenceStops": [
+    "DOBBS PLAZA",
+    "CENTENNIAL OLYMPIC PARK"
+   ],
+   "byDirection": {
+    "0": {
+     "tripsAm7to9": 3,
+     "headwayMin7to9": 40.0,
+     "medianGapMin": 15.0,
+     "firstDeparture": "08:17",
+     "lastDeparture": "22:47"
+    },
+    "1": {
+     "tripsAm7to9": 2,
+     "headwayMin7to9": 60.0,
+     "medianGapMin": 15.0,
+     "firstDeparture": "08:33",
+     "lastDeparture": "23:03"
+    }
+   }
+  },
+  "BLUE": {
+   "routeId": "29226",
+   "referenceStops": [
+    "FIVE POINTS STATION",
+    "FIVE POINTS STATION"
+   ],
+   "byDirection": {
+    "0": {
+     "tripsAm7to9": 12,
+     "headwayMin7to9": 10.0,
+     "medianGapMin": 12.0,
+     "firstDeparture": "04:47",
+     "lastDeparture": "01:42"
+    },
+    "1": {
+     "tripsAm7to9": 12,
+     "headwayMin7to9": 10.0,
+     "medianGapMin": 12.0,
+     "firstDeparture": "05:03",
+     "lastDeparture": "01:42"
+    }
+   }
+  },
+  "GOLD": {
+   "routeId": "29227",
+   "referenceStops": [
+    "WEST END STATION",
+    "ARTS CENTER STATION"
+   ],
+   "byDirection": {
+    "0": {
+     "tripsAm7to9": 12,
+     "headwayMin7to9": 10.0,
+     "medianGapMin": 12.0,
+     "firstDeparture": "04:48",
+     "lastDeparture": "01:33"
+    },
+    "1": {
+     "tripsAm7to9": 11,
+     "headwayMin7to9": 10.9,
+     "medianGapMin": 12.0,
+     "firstDeparture": "05:07",
+     "lastDeparture": "01:40"
+    }
+   }
+  },
+  "GREEN": {
+   "routeId": "29228",
+   "referenceStops": [
+    "ASHBY STATION",
+    "VINE CITY STATION"
+   ],
+   "byDirection": {
+    "0": {
+     "tripsAm7to9": 12,
+     "headwayMin7to9": 10.0,
+     "medianGapMin": 12.0,
+     "firstDeparture": "04:54",
+     "lastDeparture": "01:24"
+    },
+    "1": {
+     "tripsAm7to9": 12,
+     "headwayMin7to9": 10.0,
+     "medianGapMin": 12.0,
+     "firstDeparture": "04:55",
+     "lastDeparture": "01:10"
+    }
+   }
+  },
+  "RED": {
+   "routeId": "29229",
+   "referenceStops": [
+    "WEST END STATION",
+    "ARTS CENTER STATION"
+   ],
+   "byDirection": {
+    "0": {
+     "tripsAm7to9": 12,
+     "headwayMin7to9": 10.0,
+     "medianGapMin": 11.0,
+     "firstDeparture": "04:58",
+     "lastDeparture": "21:02"
+    },
+    "1": {
+     "tripsAm7to9": 12,
+     "headwayMin7to9": 10.0,
+     "medianGapMin": 11.0,
+     "firstDeparture": "05:00",
+     "lastDeparture": "20:48"
+    }
+   }
+  }
+ },
+ "note": "headwayMin = 120 min / max trips in one direction 07:00-09:00, all routes on that track combined."
+}

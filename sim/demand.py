@@ -1,8 +1,9 @@
 ﻿"""Commuter demand from Census LODES8 (GA, OD main, JT00 = all jobs).
 
-Keeps flows whose home block AND work block both fall inside config.BBOX,
-aggregates to block-group pairs with job counts, and snaps each block group to
-its nearest drive-network node.
+Internal flows (home AND work block inside config.BBOX) -> block-group pairs.
+Inbound flows (work inside, home outside, within MAX_INBOUND_HOME_KM) -> home tract
+-> work block-group pairs; they enter the network at boundary gateways (assign.py).
+Outbound flows (live inside, work outside) are NOT modeled (TODO).
 
     python demand.py            # build + print summary
     python demand.py --sizes    # how many in-box commuters different boxes give
@@ -62,26 +63,46 @@ def load_od() -> pd.DataFrame:
 @dataclass
 class Demand:
     year: int
-    zones: pd.DataFrame       # one row per block group: bg, tract, lng, lat, node_idx
-    od: pd.DataFrame          # o, d (zone index), jobs, peak_trips
-    total_jobs_in_box: int    # all in-box home+work jobs incl. intrazonal
+    zones: pd.DataFrame       # one row per in-box block group: bg, tract, lng, lat, node_idx
+    # One row per OD unit. Internal: home BG -> work BG (o = home zone index).
+    # Inbound (ext=True): home tract outside the box -> work BG (o = -1; home at hlng/hlat).
+    # Columns: o, d, jobs, se_low, se_mid, se_high, peak_trips, ext, home_tract, hlng, hlat
+    od: pd.DataFrame
+    total_jobs_in_box: int    # internal home+work jobs incl. intrazonal
     intrazonal_jobs: int      # same block group home & work (not assigned)
-    blocks: pd.DataFrame | None = None  # block, bg, lng, lat, home_wt, work_wt (display sampling)
+    blocks: pd.DataFrame | None = None  # in-box block, bg, lng, lat, home_wt, work_wt (display sampling)
+    inbound_jobs_total: int = 0      # all LODES jobs in box with home outside, before the distance cutoff
+    inbound_dropped_far: int = 0     # dropped: home farther than MAX_INBOUND_HOME_KM
+
+    @property
+    def internal(self) -> np.ndarray:
+        return ~self.od.ext.values
+
+
+# ASSUMPTION: inbound commuters whose home is farther than this (straight line from
+# the box centre) are dropped as unlikely daily commuters (LODES JT00 counts jobs,
+# incl. remote workers and HQ-reported jobs). ~24k of 271k in 2024.
+MAX_INBOUND_HOME_KM = 80.0
+SE_COLS = ["S000", "SE01", "SE02", "SE03"]
 
 
 def build_demand(net) -> Demand:
     t = time.time()
     xw = load_xwalk()
     inb = blocks_in_bbox(xw, config.BBOX).set_index("tabblk2020")
-    od = load_od()
-    od = od[od.h_geocode.isin(inb.index) & od.w_geocode.isin(inb.index)].copy()
+    od_all = load_od()
+    w_in = od_all.w_geocode.isin(inb.index)
+    h_in = od_all.h_geocode.isin(inb.index)
+    od = od_all[w_in & h_in].copy()
+    ob = od_all[w_in & ~h_in].copy()
     od["h_bg"] = od.h_geocode.str[:12]
     od["w_bg"] = od.w_geocode.str[:12]
     total = int(od.S000.sum())
 
-    # Block-group centroid = flow-weighted mean of its blocks' internal points.
+    # Block-group centroid = flow-weighted mean of its blocks' internal points
+    # (internal home + all work activity, incl. inbound workers).
     hb = od.groupby("h_geocode").S000.sum()
-    wb = od.groupby("w_geocode").S000.sum()
+    wb = od.groupby("w_geocode").S000.sum().add(ob.groupby("w_geocode").S000.sum(), fill_value=0)
     wts = hb.add(wb, fill_value=0)
     blk = inb.loc[wts.index].assign(wt=wts.values,
                                     home_wt=hb.reindex(wts.index).fillna(0).values,
@@ -93,10 +114,10 @@ def build_demand(net) -> Demand:
                              "lng": np.average(g.blklondd, weights=g.wt),
                              "lat": np.average(g.blklatdd, weights=g.wt),
                              "activity": g.wt.sum()}), include_groups=False).reset_index()
-    zones["node_idx"] = snap(net, zones.lng.values, zones.lat.values)
+    zones["node_idx"] = snap(net, zones.lng.values, zones.lat.values, connector_only=True)
     zid = {bg: i for i, bg in enumerate(zones.bg)}
 
-    agg = od.groupby(["h_bg", "w_bg"])[["S000", "SE01", "SE02", "SE03"]].sum().reset_index()
+    agg = od.groupby(["h_bg", "w_bg"])[SE_COLS].sum().reset_index()
     intra = int(agg.loc[agg.h_bg == agg.w_bg, "S000"].sum())
     agg = agg[agg.h_bg != agg.w_bg]
     pairs = pd.DataFrame({"o": agg.h_bg.map(zid).values, "d": agg.w_bg.map(zid).values,
@@ -107,21 +128,62 @@ def build_demand(net) -> Demand:
     same = zones.node_idx.values[pairs.o] == zones.node_idx.values[pairs.d]
     intra += int(pairs.jobs[same].sum())
     pairs = pairs[~same].reset_index(drop=True)
+    pairs["ext"] = False
+    pairs["home_tract"] = zones.tract.values[pairs.o]
+    pairs["hlng"] = zones.lng.values[pairs.o]
+    pairs["hlat"] = zones.lat.values[pairs.o]
+
+    # Inbound: home tract (outside box) -> work BG. Home point = job-weighted mean of home blocks.
+    xwi = xw.set_index("tabblk2020")
+    ob["hlat"] = xwi.blklatdd.reindex(ob.h_geocode).values
+    ob["hlng"] = xwi.blklondd.reindex(ob.h_geocode).values
+    inbound_total = int(ob.S000.sum())
+    cx, cy = (config.BBOX[0] + config.BBOX[2]) / 2, (config.BBOX[1] + config.BBOX[3]) / 2
+    dkm = np.hypot((ob.hlng - cx) * 111.32 * np.cos(np.deg2rad(cy)), (ob.hlat - cy) * 111.32)
+    far = int(ob.S000[dkm > MAX_INBOUND_HOME_KM].sum())
+    ob = ob[dkm <= MAX_INBOUND_HOME_KM].copy()
+    ob["home_tract"] = ob.h_geocode.str[:11]
+    ob["w_bg"] = ob.w_geocode.str[:12]
+    ob["wx"] = ob.hlng * ob.S000
+    ob["wy"] = ob.hlat * ob.S000
+    ea = ob.groupby(["home_tract", "w_bg"])[SE_COLS + ["wx", "wy"]].sum().reset_index()
+    tc = ob.groupby("home_tract")[["wx", "wy", "S000"]].sum()
+    ext = pd.DataFrame({"o": -1, "d": ea.w_bg.map(zid).values, "jobs": ea.S000.values,
+                        "se_low": ea.SE01.values, "se_mid": ea.SE02.values, "se_high": ea.SE03.values,
+                        "ext": True, "home_tract": ea.home_tract.values,
+                        "hlng": (tc.wx / tc.S000).reindex(ea.home_tract).values,
+                        "hlat": (tc.wy / tc.S000).reindex(ea.home_tract).values})
+    pairs = pd.concat([pairs, ext], ignore_index=True)
     pairs["peak_trips"] = pairs.jobs * PEAK_HOUR_SHARE
-    print(f"demand: {len(zones)} block groups, {len(pairs)} OD pairs, {pairs.jobs.sum():,} commuters "
-          f"(+{intra:,} intrazonal not assigned) from LODES {lodes_year()} ({time.time()-t:.1f}s)")
+    n_int = int(pairs.jobs[~pairs.ext].sum())
+    n_ext = int(pairs.jobs[pairs.ext].sum())
+    print(f"demand: {len(zones)} block groups; internal {n_int:,} commuters in {(~pairs.ext).sum():,} BG pairs "
+          f"(+{intra:,} intrazonal not assigned); inbound {n_ext:,} in {pairs.ext.sum():,} tract->BG pairs "
+          f"(dropped {far:,} living > {MAX_INBOUND_HOME_KM:g} km) from LODES {lodes_year()} ({time.time()-t:.1f}s)")
     blocks = blk.rename_axis("block").reset_index()[["block", "bg", "blklondd", "blklatdd", "home_wt", "work_wt"]].rename(
         columns={"blklondd": "lng", "blklatdd": "lat"})
     return Demand(year=lodes_year(), zones=zones, od=pairs, total_jobs_in_box=total, intrazonal_jobs=intra,
-                  blocks=blocks)
+                  blocks=blocks, inbound_jobs_total=inbound_total, inbound_dropped_far=far)
 
 
-def snap(net, lng, lat) -> np.ndarray:
+# Zone connectors attach to nodes on these road classes (not local residential
+# streets), so a big job zone does not load thousands of cars onto one side street.
+CONNECTOR_CLASSES = {"tertiary", "secondary", "primary", "trunk", "tertiary_link", "secondary_link",
+                     "primary_link"}
+
+
+def snap(net, lng, lat, connector_only: bool = False) -> np.ndarray:
+    """Nearest node in the strongly connected core (so every zone pair is routable);
+    with connector_only, nearest such node on a CONNECTOR_CLASSES road."""
     lat0 = np.deg2rad(np.mean(net.node_xy[:, 1]))
-    pts = np.c_[net.node_xy[:, 0] * np.cos(lat0), net.node_xy[:, 1]]
+    ok = np.where(net.in_scc)[0] if getattr(net, "in_scc", None) is not None else np.arange(net.n_nodes)
+    if connector_only:
+        e = net.edges[net.edges.highway.isin(CONNECTOR_CLASSES)]
+        ok = np.intersect1d(ok, np.union1d(e.u_idx.values, e.v_idx.values))
+    pts = np.c_[net.node_xy[ok, 0] * np.cos(lat0), net.node_xy[ok, 1]]
     tree = cKDTree(pts)
     _, idx = tree.query(np.c_[np.asarray(lng) * np.cos(lat0), np.asarray(lat)])
-    return idx
+    return ok[idx]
 
 
 def load_demand(net, rebuild: bool = False) -> Demand:
@@ -165,6 +227,9 @@ if __name__ == "__main__":
         d = _self.load_demand(load_network(), rebuild=True)
         print(d.zones.head())
         print(f"total in-box jobs {d.total_jobs_in_box:,}; tracts {d.zones.tract.nunique()}")
+
+
+
 
 
 

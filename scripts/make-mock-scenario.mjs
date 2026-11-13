@@ -134,8 +134,11 @@ for (const w of ways) {
   } else if (t.railway === "rail") {
     id = "freight"; name = "Freight rail (CSX / Norfolk Southern)"; kind = "freight";
   } else continue;
-  if (!railGroups.has(id)) railGroups.set(id, { id, name, kind, paths: [] });
-  railGroups.get(id).paths.push(simplify(geom(w), 0.004).map(r5));
+  if (!railGroups.has(id)) railGroups.set(id, { id, name, kind, paths: [], structures: [], layers: [] });
+  const g = railGroups.get(id);
+  g.paths.push(simplify(geom(w), 0.004).map(r5));
+  g.structures.push(t.tunnel && t.tunnel !== "no" && t.tunnel !== "building_passage" ? "tunnel" : t.bridge && t.bridge !== "no" ? "bridge" : "grade");
+  g.layers.push(parseInt(t.layer, 10) || 0);
 }
 const rail = [...railGroups.values()].sort((a, b) => a.id.localeCompare(b.id));
 
@@ -475,7 +478,9 @@ const gainedMin = -gains.reduce((s, a) => s + a.stake.minutesDelta, 0);
 const redlinedTracts = new Set(tracts.filter((t) => t.redlined).map((t) => t.id));
 const redlinedShare = gainedMin ? -gains.filter((a) => redlinedTracts.has(a.tractId)).reduce((s, a) => s + a.stake.minutesDelta, 0) / gainedMin : 0;
 const pressureHouseholds = Math.round(tracts.filter((t) => t.rentPressure).reduce((s, t) => s + t.households * t.renterShare, 0));
-const lineDailyRiders = Math.round(switchers.length * SCALE * 2); // two trips a day
+// The display sample over-weights corridor homes, so scale line riders down (placeholder factor).
+const CORRIDOR_OVERSAMPLE = 0.5;
+const lineDailyRiders = Math.round(switchers.length * SCALE * CORRIDOR_OVERSAMPLE);
 const costPerRider = (CAPITAL_USD / 20 + OPEX_USD_YR) / (Math.max(1, lineDailyRiders) * 255);
 const timeSavedHrs = Math.round(totalSavedMin / 60);
 const newRidersDay = Math.round(newRiders.length * SCALE);
@@ -565,6 +570,7 @@ const scenario = {
   title: edit.name,
   edit,
   isMock: true,
+  source: "mock",
   generatedAt: "2026-11-13T00:00:00.000Z",
   timeWindow: { startSec: 0, endSec: 14400 },
   line: { path: linePath, stops: lineStops },

@@ -1,4 +1,4 @@
-"""Build a contract-shaped ScenarioResult dict from baseline (+ optional proposed) runs.
+﻿"""Build a contract-shaped ScenarioResult dict from baseline (+ optional proposed) runs.
 
 Sections the sim computes: metrics, agents (display sample), roads, tracts, line,
 impact.modeSplit, impact.minutesSavedByEarnings, whoPays.approval, and the values
@@ -23,18 +23,22 @@ from transit import trace
 
 DISPLAY_SAMPLE_SIZE = 3000
 SEED = 42
-# ASSUMPTION: display departure times ~ Normal(7:30, 30 min), clipped to 6:15-9:30.
-DEPART_MEAN_S = 5400
+# ASSUMPTION (display only): work ARRIVAL times ~ Normal(8:20, 30 min), clipped to
+# 7:00-9:50; departure = arrival - baseline door-to-door minutes (floored at 6:00).
+# Arrival-based so long inbound trips still play inside the 6:00-10:00 window.
+DEPART_MEAN_S = 8400
 DEPART_SD_S = 1800
-DEPART_CLIP_S = (900, 12600)
+DEPART_CLIP_S = (3600, 13800)
 PATH_SIMPLIFY_DEG = 0.00008      # ~8 m Douglas-Peucker on drive paths
 NOISE_BUFFER_M = 150.0           # contract: noise/construction zone around new track
 NETWORK_URL = "/scenarios/network.json"
 ROAD_CLASSES = {"motorway", "trunk", "primary", "secondary", "tertiary", "motorway_link",
                 "trunk_link", "primary_link", "secondary_link", "tertiary_link"}
 # GTFS route_short_name -> contract RailLine ids (frontend network.json naming).
-LINE_IDS = {"ATLSC": "atlanta_streetcar", "RED": "marta_red", "GOLD": "marta_gold",
-            "BLUE": "marta_blue", "GREEN": "marta_green"}
+# network.json splits heavy rail geographically (marta_north, marta_east_west, ...)
+# while GTFS routes are colours; this is the closest in-box match. Bus -> "bus_<n>".
+LINE_IDS = {"ATLSC": "atlanta_streetcar", "RED": "marta_north", "GOLD": "marta_north",
+            "BLUE": "marta_east_west", "GREEN": "marta_east_west"}
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +64,9 @@ def draw_sample(dem, n=DISPLAY_SAMPLE_SIZE, seed=SEED) -> Sample:
     for i, pi in enumerate(pair):
         r = od.iloc[pi]
         for arr, zi, col in ((home, r.o, "home_wt"), (work, r.d, "work_wt")):
+            if int(zi) < 0:  # inbound: home = job-weighted home point of the tract (outside the box)
+                arr[i] = (r.hlng, r.hlat)
+                continue
             g = by_bg[zones.bg.iloc[int(zi)]]
             wt = g[col].values.astype(float)
             if wt.sum() <= 0:
@@ -107,11 +114,18 @@ def _finish(mode, minutes, coords, times, lines=None):
 
 
 def drive_trip(net, run, pair, home, work, depart):
+    """Internal: path starts at home. Inbound: path starts at the gateway, at the time
+    the (estimated, not drawn) out-of-box leg ends."""
     asg = run.asg
     edges = trace_path(net, asg.sp, int(asg.od_row[pair]), int(asg.od_dest[pair]))
     half = DRIVE_TERMINAL_MIN * 30.0
-    coords, times = [list(home)], [depart]
-    t = depart + half
+    out_s = float(asg.out_min[pair]) * 60.0 if asg.out_min is not None else 0.0
+    if out_s > 0:
+        gnode = net.gateways.node_idx.values[int(asg.gateway[pair])]
+        coords, times = [list(net.node_xy[gnode])], [depart + half + out_s]
+    else:
+        coords, times = [list(home)], [depart]
+    t = depart + half + out_s
     for ei in edges:
         g = net.edge_geoms[ei]
         seg = [_seg_len(g[k], g[k + 1]) for k in range(len(g) - 1)]
@@ -129,20 +143,31 @@ def drive_trip(net, run, pair, home, work, depart):
     return _finish("drive", run.drive_min[pair], coords, times)
 
 
+def _in_box(xy, buf=0.002):
+    w, s, e, n = config.BBOX
+    return w - buf <= xy[0] <= e + buf and s - buf <= xy[1] <= n + buf
+
+
 def transit_trip(dem, run, pair, home, work, depart):
+    """Internal: path starts at home. Inbound: the estimated access leg is not drawn and
+    the rail ride is drawn only from where it enters the box (gateway station)."""
     tg, sk = run.tg, run.tsk
-    o, d = int(dem.od.o.values[pair]), int(dem.od.d.values[pair])
-    nodes = trace(tg, sk, o, d)
+    d = int(dem.od.d.values[pair])
+    ext = bool(dem.od.ext.values[pair])
+    nodes = trace(tg, sk, pair, d)
     if not nodes:
         return None
+    r = int(sk.row[pair])
+    t_acc = float(sk.access_min[pair]) * 60.0 if sk.access_min is not None else 0.0
+    o = r  # row into dist
     coords, times, lines = [], [], []
     for idx, nd in enumerate(nodes):
         xy = list(tg.node_xy[nd])
-        if idx == 0:
+        if idx == 0 and not ext:
             xy = list(home)
         elif idx == len(nodes) - 1:
             xy = list(work)
-        tt = depart + float(sk.dist[o, nd])
+        tt = depart + t_acc + float(sk.dist[o, nd])
         prev = nodes[idx - 1] if idx else None
         pi = int(tg.rs_pattern[nd])
         if pi >= 0:
@@ -150,10 +175,11 @@ def transit_trip(dem, run, pair, home, work, depart):
             lines.append(LINE_IDS.get(p.route_name, "proposed" if p.route_id.startswith("proposed")
                                       else f"bus_{p.route_name}"))
             # in-vehicle hop with a drawn path: interpolate interior vertices
+            hp = None
             if prev is not None and tg.rs_pattern[prev] == pi and p.hop_paths:
-                j = int(tg.rs_pos[prev])
-                hp = p.hop_paths[j]
-                t0 = depart + float(sk.dist[o, prev])
+                hp = p.hop_paths[int(tg.rs_pos[prev])]
+            if hp:
+                t0 = depart + t_acc + float(sk.dist[o, prev])
                 seg = [_seg_len(hp[k], hp[k + 1]) for k in range(len(hp) - 1)]
                 tot = sum(seg) or 1.0
                 acc = 0.0
@@ -161,7 +187,11 @@ def transit_trip(dem, run, pair, home, work, depart):
                     acc += seg[k - 1]
                     coords.append(hp[k]); times.append(t0 + (tt - t0) * acc / tot)
         coords.append(xy); times.append(tt)
-    return _finish("transit", run.transit_min[pair], coords, times, lines)
+    if ext:  # drop the out-of-box part of the drawn path
+        k = next((i for i, c in enumerate(coords) if _in_box(c)), len(coords) - 1)
+        coords, times = coords[k:], times[k:]
+    mode = "park_ride" if (sk.pnr is not None and sk.pnr[pair]) else "transit"
+    return _finish(mode, run.transit_min[pair], coords, times, lines)
 
 
 # ---------------------------------------------------------------------------
@@ -200,10 +230,11 @@ def tract_effects(dem, base_run, prop_run):
     od = dem.od
     eb = base_run.expected_min()
     ep = prop_run.expected_min() if prop_run is not None else eb
-    tr = z.tract.values[od.o.values]
     import pandas as pd
 
-    df = pd.DataFrame({"tract": tr, "w": od.jobs.values, "d": (ep - eb) * od.jobs.values})
+    # Residents of in-box tracts only (inbound commuters live outside these tracts).
+    df = pd.DataFrame({"tract": od.home_tract.values, "w": od.jobs.values, "d": (ep - eb) * od.jobs.values})
+    df = df[~od.ext.values]
     agg = df.groupby("tract")[["w", "d"]].sum()
     cen = z.assign(wx=z.lng * z.activity, wy=z.lat * z.activity).groupby("tract")[["wx", "wy", "activity"]].sum()
     out = []
@@ -255,17 +286,28 @@ def load_mock():
 
 
 def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=DISPLAY_SAMPLE_SIZE,
-                 seed=SEED) -> dict:
+                 seed=SEED, riders_on_line: float = 0.0) -> dict:
     net, dem, brun = base.net, base.dem, base.run
     prun = prop_run or brun
     line = line or {"path": [], "stops": []}
     s = draw_sample(dem, n_sample, seed)
     noise = _near_line(s.home, line["path"], NOISE_BUFFER_M)
 
+    import verdict as vd
+
+    mb = metrics(dem, brun, n_sample)
+    mp = metrics(dem, prun, n_sample)
+    roads = road_effects(net, brun, prop_run)
+    A = vd.assess(base, prop_run, edit, line, riders_on_line, mb, mp, roads)
+    eq_rng = np.random.default_rng(seed + 1)  # separate stream: renter sampling
+
     agents = []
     for i in range(n_sample):
         pi = int(s.pair[i])
         trips = []
+        b_transit = s.u[i] < brun.p_transit[pi] and np.isfinite(brun.transit_min[pi])
+        b_min = brun.transit_min[pi] if b_transit else brun.drive_min[pi]
+        s.depart[i] = max(0.0, s.depart[i] - 60.0 * float(b_min))  # sampled arrival -> departure
         for run in (brun, prun):
             tr = None
             if s.u[i] < run.p_transit[pi]:
@@ -274,40 +316,42 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
                 tr = drive_trip(net, run, pi, s.home[i], s.work[i], s.depart[i])
             trips.append(tr)
         delta = trips[1]["minutes"] - trips[0]["minutes"]
-        # ASSUMPTION: support ~ tanh(minutes saved / 5), minus 0.3 inside the noise zone.
-        support = float(np.clip(np.tanh(-delta / 5.0) - (0.3 if noise[i] else 0.0), -1, 1))
+        tract_id = str(dem.od.home_tract.values[pi])  # inbound: home tract outside the box
+        renter, pressure, cost_share = vd.agent_equity(A["ctx"], tract_id, s.home[i], eq_rng)
+        # ASSUMPTION: support ~ tanh(minutes saved / 5), minus 0.3 inside the noise zone,
+        # minus 0.2 for renters in the rent-pressure zone.
+        support = float(np.clip(np.tanh(-delta / 5.0) - (0.3 if noise[i] else 0.0) - (0.2 if pressure else 0.0), -1, 1))
         agents.append({
             "id": f"a{i:05d}", "home": [round(s.home[i][0], 5), round(s.home[i][1], 5)],
             "work": [round(s.work[i][0], 5), round(s.work[i][1], 5)],
-            "tractId": dem.zones.tract.iloc[int(dem.od.o.values[pi])],
+            "tractId": tract_id,
             "earningsBand": s.band[i],
-            "renter": False,   # PLACEHOLDER until ACS B25003 is wired
+            "renter": renter,  # SAMPLED from the home tract's ACS renter share (seeded), not observed
             "hasCar": True,    # PLACEHOLDER: mode choice assumes car access (ACS B08141 TODO)
             "baseline": trips[0], "proposed": trips[1],
-            "stake": {"minutesDelta": round(delta, 1), "rentPressure": False, "noiseZone": bool(noise[i]),
-                      "costShareUsdYr": 0.0, "supportScore": round(support, 3)},
-            "displacementRisk": "none",
+            "stake": {"minutesDelta": round(delta, 1), "rentPressure": pressure, "noiseZone": bool(noise[i]),
+                      "costShareUsdYr": cost_share, "supportScore": round(support, 3)},
+            "displacementRisk": "none",  # NOT MODELED (no defensible year-5/10 proxy yet)
         })
 
-    mb = metrics(dem, brun, n_sample)
-    mp = metrics(dem, prun, n_sample)
     mock, from_mock = load_mock()
     jobs = dem.od.jobs.values
     saved_min = brun.expected_min() - prun.expected_min()
 
-    verdict = copy.deepcopy(mock["verdict"])
-    for t in verdict["tests"]:
-        if t["key"] == "time_saved":
-            t["value"] = round(float((saved_min * jobs).sum() / 60.0), 1)
-            t["unit"] = "hrs/day"
-        elif t["key"] == "new_riders":
-            t["value"] = round(mp["dailyTransitRiders"] - mb["dailyTransitRiders"], 1)
-            t["unit"] = "riders/day"
+    verdict = {"label": A["label"], "headline": A["headline"], "summary": A["summary"], "tests": A["tests"],
+               "alternatives": copy.deepcopy(mock["verdict"].get("alternatives", []))}
 
     impact = copy.deepcopy(mock["impact"])
-    impact["modeSplit"] = {"before": {"drive": round(1 - mb["transitShare"], 4), "transit": mb["transitShare"], "park_ride": 0.0},
-                           "after": {"drive": round(1 - mp["transitShare"], 4), "transit": mp["transitShare"], "park_ride": 0.0},
-                           "scope": "all modeled commuters (home and work in the study box)"}
+
+    def split(run):
+        p = run.p_transit
+        pnr = run.tsk.pnr if run.tsk.pnr is not None else np.zeros(len(p), bool)
+        pr = float((jobs * p * pnr).sum() / jobs.sum())
+        tr = float((jobs * p * ~pnr).sum() / jobs.sum())
+        return {"drive": round(1 - pr - tr, 4), "transit": round(tr, 4), "park_ride": round(pr, 4)}
+
+    impact["modeSplit"] = {"before": split(brun), "after": split(prun),
+                           "scope": "all modeled commuters working in the study box (internal + inbound)"}
     bands = []
     for col, band, label in (("se_low", "low", "Under $1,250/mo"), ("se_mid", "mid", "$1,250-3,333/mo"),
                              ("se_high", "high", "Over $3,333/mo")):
@@ -317,29 +361,35 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
     impact["minutesSavedByEarnings"] = bands
     copied = "copied from the frontend mock" if from_mock else "sim placeholders (no mock file found)"
     impact["notes"] = [
-        "Sim-computed: metrics, agents, roads, tracts, line, impact.modeSplit, impact.minutesSavedByEarnings, "
-        "whoPays.approval, verdict tests time_saved and new_riders (values only).",
-        f"Not computed by the sim ({copied}): verdict headline/summary/grades/alternatives, other verdict tests, "
-        "impact.tiles, impact.calibration, whoPays.items, claims, personas, lookahead.",
-        "Background road traffic is a PLACEHOLDER fraction of capacity (HPMS not wired); "
-        "in-box LODES commuters are a small share of real traffic.",
-        "Mode choice: one global constant calibrated to a PLACEHOLDER 12% transit share (ACS not wired).",
-    ]
+        "Sim-computed: metrics, agents, roads, tracts (real polygons + ACS/HOLC equity fields), line, "
+        "impact.modeSplit, impact.minutesSavedByEarnings, verdict label/headline/summary/grades and all five tests, "
+        "whoPays.items and whoPays.approval.",
+        f"Not computed by the sim ({copied}): verdict.alternatives, impact.tiles, impact.calibration, claims, "
+        "personas, lookahead.",
+        "Background road traffic is a PLACEHOLDER fraction of capacity (HPMS not wired), lowered now that "
+        "inbound commuters are modeled.",
+        "Inbound commuters (home outside the box): only the in-box part of their trip is routed on the network; "
+        "the approach outside the box (drive to a gateway, or walk/drive to a MARTA station) is an ESTIMATE "
+        "added to their minutes. Their drawn paths start where they enter the box. Outbound commuters are not modeled.",
+        "Mode choice: one global constant calibrated to a PLACEHOLDER 12% transit share (ACS mode share not wired).",
+    ] + A["notes"]
 
-    who = copy.deepcopy(mock["whoPays"])
     sup = np.array([a["stake"]["supportScore"] for a in agents])
-    who["approval"] = {"support": round(float((sup > 0.1).mean()), 3), "oppose": round(float((sup < -0.1).mean()), 3),
-                       "basis": int(len(sup)),
-                       "note": "From display-sample stake scores (minutes delta + noise zone only; rent/cost not yet modeled)."}
+    who = {"items": A["items"],
+           "approval": {"support": round(float((sup > 0.1).mean()), 3), "oppose": round(float((sup < -0.1).mean()), 3),
+                        "basis": int(len(sup)),
+                        "note": "From display-sample stake scores: minutes delta, noise zone, and rent-pressure "
+                                "exposure of sampled renters (cost share not yet in the score)."}}
 
     res = {
-        "id": scen_id, "contractVersion": CONTRACT_VERSION, "title": title, "edit": edit, "isMock": False,
+        "id": scen_id, "source": "prebaked_sim", "contractVersion": CONTRACT_VERSION, "title": title, "edit": edit,
+        "isMock": False, "mockSections": MOCK_SECTIONS,
         "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "timeWindow": {"startSec": 0, "endSec": 14400},
         "line": line, "networkUrl": NETWORK_URL,
         "metrics": {"baseline": mb, "proposed": mp},
         "verdict": verdict, "impact": impact, "agents": agents,
-        "roads": road_effects(net, brun, prop_run), "tracts": tract_effects(dem, brun, prop_run),
+        "roads": roads, "tracts": A["tracts"],
         "whoPays": who, "claims": copy.deepcopy(mock.get("claims", [])),
         "personas": copy.deepcopy(mock.get("personas", [])),
         "lookahead": copy.deepcopy(mock["lookahead"]),
@@ -348,9 +398,16 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
     return res
 
 
+# Sections still copied from the frontend mock (contract MOCK_SECTION_KEYS).
+MOCK_SECTIONS = ["verdict.alternatives", "impact.tiles", "impact.calibration", "claims", "personas", "lookahead"]
+
 def write_result(res: dict, name: str | None = None):
     config.ensure_dirs()
     path = config.SCENARIO_OUT_DIR / f"{name or res['id']}.sim.json"
     path.write_text(json.dumps(res, separators=(",", ":")), encoding="utf-8")
     print(f"wrote {path} ({path.stat().st_size/1e6:.2f} MB, {len(res['agents'])} agents)")
     return path
+
+
+
+

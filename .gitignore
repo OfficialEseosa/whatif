@@ -34,6 +34,7 @@ yarn-error.log*
 .env
 .env*.local
 !.env.local.example
+env.download
 
 # python (sim/)
 __pycache__/
