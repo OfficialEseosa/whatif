@@ -8,7 +8,7 @@
  * Camera: free orbit. Drag = pan, right-drag / ctrl-drag = rotate + tilt (to 85°), wheel = zoom,
  * two-finger touch rotate/tilt. The store's `camera` only issues fly-to moves; it never clamps.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import DeckGL from "@deck.gl/react";
 import { FlyToInterpolator, type Layer, type MapViewState, type PickingInfo } from "@deck.gl/core";
 import { INITIAL_CAMERA, useStore, selectMapScenario } from "@/lib/store";
@@ -41,7 +41,6 @@ export default function DeckMap() {
   const scenario = useStore(selectMapScenario);
   const built = useStore((s) => s.scenario !== null);
   const view = useStore((s) => s.view);
-  const camera = useStore((s) => s.camera);
   const time = useStore((s) => s.time);
   const horizon = useStore((s) => s.horizon);
   const tab = useStore((s) => s.tab);
@@ -70,27 +69,36 @@ export default function DeckMap() {
     });
   }, []);
 
-  // --- camera (controlled; fly-to on store.camera changes, never resets bearing/pitch otherwise)
-  const [viewState, setViewState] = useState<MapViewState>({ ...INITIAL_CAMERA, maxPitch: MAX_PITCH });
-  // React's "adjust state when a prop changes" pattern (no effects).
-  const [seenCamera, setSeenCamera] = useState(camera);
-  if (seenCamera !== camera) {
-    setSeenCamera(camera);
-    setViewState((v) => ({
-      ...v,
-      ...camera,
+  // --- camera. deck.gl owns the live view (uncontrolled, so nothing here clamps or resets it);
+  // we only hand it a new `initialViewState` to fly somewhere: store.camera moves, view toggles,
+  // compass/reset. `live` tracks the current view so those moves start from where the user is.
+  const live = useRef<MapViewState>({ ...INITIAL_CAMERA, maxPitch: MAX_PITCH });
+  const [ivs, setIvs] = useState<MapViewState>({ ...INITIAL_CAMERA, maxPitch: MAX_PITCH });
+  const [bearing, setBearing] = useState(INITIAL_CAMERA.bearing);
+  const fly = useCallback((to: Partial<MapViewState>, ms: number, threeD: boolean) => {
+    setIvs({
+      ...live.current,
+      ...to,
       maxPitch: MAX_PITCH,
-      transitionDuration: camera.transitionDuration ?? 800,
+      position: [0, 0, threeD ? PHOTOREAL_TARGET_Z : 0],
+      transitionDuration: ms,
       transitionInterpolator: new FlyToInterpolator(),
-    }));
-  }
-  const [seenPhotoreal, setSeenPhotoreal] = useState(photoreal);
-  if (seenPhotoreal !== photoreal) {
-    setSeenPhotoreal(photoreal);
-    // Entering photoreal from a flat view: tilt so the buildings read. Keep bearing/zoom/center.
-    if (photoreal && (viewState.pitch ?? 0) < 45)
-      setViewState({ ...viewState, pitch: 55, transitionDuration: 600, transitionInterpolator: new FlyToInterpolator() });
-  }
+    });
+  }, []);
+  useEffect(
+    () =>
+      useStore.subscribe((s, prev) => {
+        const threeD = s.view === "photoreal" && !!GOOGLE_KEY && !s.underground;
+        const wasThreeD = prev.view === "photoreal" && !!GOOGLE_KEY && !prev.underground;
+        if (s.camera !== prev.camera) fly(s.camera, s.camera.transitionDuration ?? 800, threeD);
+        else if (threeD !== wasThreeD) {
+          // Entering photoreal from a flat view: tilt so the buildings read. Keep bearing/zoom/center.
+          const pitch = threeD && (live.current.pitch ?? 0) < 45 ? 55 : live.current.pitch;
+          fly({ pitch }, 600, threeD);
+        }
+      }),
+    [fly],
+  );
 
   const switchStep = built ? Math.round(switchProgress * 10) / 10 : 0;
   const agents = scenario?.agents;
@@ -134,13 +142,16 @@ export default function DeckMap() {
   const finalLayers = layers.map((l) => (sfx && !l.id.startsWith("google-") ? l.clone({ id: `${l.id}${sfx}` }) : l));
   const googleOnScreen = p3d || (!photoreal && !!GOOGLE_KEY && !!session);
   const credits = photoreal ? credits3d : credits2d;
-  const bearing = viewState.bearing ?? 0;
 
   return (
     <div className="map-canvas">
       <DeckGL
-        viewState={{ ...viewState, position: [0, 0, p3d ? PHOTOREAL_TARGET_Z : 0] }}
-        onViewStateChange={({ viewState: v }) => setViewState({ ...(v as MapViewState), maxPitch: MAX_PITCH })}
+        initialViewState={ivs}
+        onViewStateChange={({ viewState: v }) => {
+          live.current = v as MapViewState;
+          const b = (v as MapViewState).bearing ?? 0;
+          if (Math.abs(b - bearing) > 2) setBearing(b);
+        }}
         controller={{ dragRotate: true, touchRotate: true, keyboard: true, inertia: 300 }}
         layers={finalLayers}
         getTooltip={tooltip}
@@ -150,14 +161,14 @@ export default function DeckMap() {
           className="btn compass"
           title="North up (drag with right mouse button or Ctrl to rotate and tilt)"
           aria-label={`Bearing ${Math.round(bearing)} degrees. Reset to north`}
-          onClick={() => setViewState((v) => ({ ...v, bearing: 0, transitionDuration: 500, transitionInterpolator: new FlyToInterpolator() }))}
+          onClick={() => fly({ bearing: 0 }, 500, p3d)}
         >
           <span style={{ display: "inline-block", transform: `rotate(${-bearing}deg)` }}>▲</span>
         </button>
         <button
           className="btn"
           title="Reset view"
-          onClick={() => setViewState({ ...INITIAL_CAMERA, pitch: photoreal ? 55 : INITIAL_CAMERA.pitch, maxPitch: MAX_PITCH, transitionDuration: 900, transitionInterpolator: new FlyToInterpolator() })}
+          onClick={() => fly({ ...INITIAL_CAMERA, pitch: photoreal ? 55 : INITIAL_CAMERA.pitch }, 900, p3d)}
         >
           Reset view
         </button>
