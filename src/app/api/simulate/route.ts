@@ -22,7 +22,7 @@ import { MOCK_SCENARIO_ID, annotate, findPrebakedSim, readMockScenario } from "@
 
 // A live run of the full region takes tens of seconds; allow the function up to 90 s (Node runtime).
 export const maxDuration = 90;
-const LIVE_TIMEOUT_MS = 80_000;
+const LIVE_TIMEOUT_MS = 85_000;
 /** Refuse absurd live responses (a full result is ~6 MB of JSON). */
 const MAX_LIVE_BYTES = 40_000_000;
 /** Above this, the JSON is gzipped here: Vercel caps function responses at 4.5 MB. */
@@ -58,10 +58,10 @@ async function fromLiveSim(body: SimulateRequest): Promise<Live | null> {
   } catch (e) {
     const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
     console.warn(`[simulate] sim service ${timedOut ? "timed out" : "unreachable"} (${e instanceof Error ? e.message : e})`);
-    return timedOut
-      ? { kind: "error", status: 504, message: `The simulator did not finish within ${LIVE_TIMEOUT_MS / 1000} s.` }
-      : { kind: "error", status: 503, message: "The simulator is offline right now." };
+    return { kind: "error", status: timedOut ? 504 : 503, message: "The simulator didn't respond." };
   }
+  // 401/403: our token was refused, so for this site the simulator is effectively offline.
+  if (res.status === 401 || res.status === 403) return null;
   // 400/422: the sim can't place this edit; 501: plan type not implemented.
   if (res.status === 400 || res.status === 422 || res.status === 501) return { kind: "unsupported", message: await simMessage(res) };
   if (!res.ok) {
