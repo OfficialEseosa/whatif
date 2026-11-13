@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
@@ -27,6 +27,14 @@ const mono = Geist_Mono({
 export const metadata: Metadata = {
   title: "WhatIf ATL",
   description: "Try a transit plan for Atlanta and see who it helps, who pays, and what happened last time.",
+};
+
+/** On Android the page shrinks when the keyboard opens, so the prompt stays above it. */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  interactiveWidget: "resizes-content",
+  themeColor: "#0b0c0e",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

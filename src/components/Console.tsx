@@ -16,6 +16,7 @@ import { TodayCard } from "./TodayCard";
 import { Wordmark } from "./Wordmark";
 import { ResultsPanel } from "./results/ResultsPanel";
 import { RunPanel } from "./run/RunPanel";
+import "./phone.css";
 
 export function Console() {
   useBootData();

@@ -33,6 +33,7 @@ export function Composer() {
   const setUi = useUi((s) => s.setUi);
   const build = useBuildFlow();
   const ref = useRef<HTMLTextAreaElement>(null);
+  const dock = useRef<HTMLDivElement>(null);
 
   const busy = BUSY.has(phase);
   const mode = detectMode(text);
@@ -60,6 +61,15 @@ export function Composer() {
       unPersist();
       unRecord();
     };
+  }, []);
+
+  // The phone layout stacks its cards above the dock, so it needs the dock's height (phone.css).
+  useEffect(() => {
+    const el = dock.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => el.parentElement?.style.setProperty("--dock-h", `${el.offsetHeight}px`));
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   // "/" focuses the box from anywhere that is not already a text field.
@@ -97,7 +107,7 @@ export function Composer() {
   };
 
   return (
-    <div className="dock" data-state={busy ? "running" : built ? "result" : "idle"}>
+    <div className="dock" ref={dock} data-state={busy ? "running" : built ? "result" : "idle"}>
       {/* A run's own failure is shown in the run panel; this banner is for anything else. */}
       {error && !busy && !hasRun && (
         <p className="surface dock-error" role="alert">

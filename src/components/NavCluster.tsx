@@ -57,7 +57,7 @@ export function NavCluster() {
 
   return (
     <>
-      <button className="cbtn" title="Fly back to the starting view of Atlanta" onClick={() => flyTo(INITIAL_CAMERA, 1600)}>
+      <button className="cbtn cbtn-reset" title="Fly back to the starting view of Atlanta" onClick={() => flyTo(INITIAL_CAMERA, 1600)}>
         <ResetIcon />
         Reset view
       </button>
@@ -65,7 +65,7 @@ export function NavCluster() {
         ⟲
       </button>
       <button
-        className="cbtn cbtn-icon"
+        className="cbtn cbtn-icon cbtn-compass"
         aria-label="Compass: click to put north at the top, drag around it to turn the map"
         title="Compass. Click to put north at the top, drag to turn the map"
         onPointerDown={(e) => {

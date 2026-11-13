@@ -1,0 +1,78 @@
+/*
+ * Phone layout (portrait, up to 640px wide). Nothing here applies on wider screens.
+ * Top: wordmark row, then the control bar. Bottom: the prompt dock. Cards sit between them.
+ * --dock-h is the prompt dock's measured height (set in Composer.tsx).
+ */
+@media (max-width: 640px) {
+  html { -webkit-text-size-adjust: 100%; }
+  body { overscroll-behavior: none; }
+  .app { --top: calc(var(--gut) + 104px); --m-bottom: calc(var(--dock-h, 150px) + var(--gut) + 8px); -webkit-tap-highlight-color: transparent; }
+  .app:has(.run-progress) { --m-bottom: calc(var(--dock-h, 150px) + var(--gut) + 46px); }
+  .app button { touch-action: manipulation; }
+  /* 16px and up: iOS zooms the page when a smaller field takes focus */
+  .app input.input, .app .composer-input { font-size: 16px; }
+
+  /* top: wordmark with reset and compass beside it, control bar underneath */
+  .app .wordmark-word { font-size: 26px; }
+  .app .wordmark-city { font-size: 16px; }
+  .app .cluster { top: calc(var(--gut) + 52px); left: var(--gut); right: var(--gut); gap: 0; }
+  .app .cluster .seg { flex: none; margin-right: 2px; }
+  .app .cluster .seg-btn { padding: 0 10px; }
+  .app .cluster .cbtn { flex: 1; justify-content: center; padding: 0 4px; font-size: 14px; }
+  .app .cluster .cbtn-reset, .app .cluster .cbtn-compass { position: absolute; top: -53px; flex: none; width: 44px; height: 44px; padding: 0; background: #17181c; border: 1px solid var(--rule); border-radius: var(--radius); box-shadow: var(--shadow-hard); }
+  .app .cluster .cbtn-compass { right: -1px; }
+  .app .cluster .cbtn-reset { right: 51px; font-size: 0; }
+  .app .cluster .cbtn-reset svg, .app .cluster .cbtn-compass svg { display: block; }
+
+  /* layers, history and the map note: sheets over the lower half, so the map stays in view above */
+  .app .pop, .app .sheet { top: auto; bottom: var(--m-bottom); left: var(--gut); right: var(--gut); width: auto; max-height: min(52dvh, calc(100dvh - var(--top) - 8px - var(--m-bottom))); }
+  .app .sheet { height: 52dvh; }
+  .app .note { top: var(--top); left: var(--gut); right: var(--gut); width: auto; transform: none; max-height: 30dvh; animation-name: fade-in; }
+  .app:has(> .pop, > .sheet) :is(.results, .results-chip, .rp, .crumbs, .followups, .timestrip) { display: none; }
+
+  /* prompt dock */
+  .app .dock { left: var(--gut); right: var(--gut); width: auto; transform: none; bottom: calc(var(--gut) + env(safe-area-inset-bottom, 0px)); }
+  .app .composer { min-height: 56px; gap: 8px; padding: 6px 6px 6px 14px; }
+  .app .composer-input { line-height: 22px; padding: 11px 0; max-height: 110px; }
+  .app .btn-run.fr-run { padding: 0 12px; }
+  .app .fr-intro { padding: 10px 14px; }
+  .app .fr-title { font-size: 18px; line-height: 24px; }
+  .app .fr-lead { font-size: 14px; line-height: 20px; }
+  .app .fr-try .examples, .app .followups { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-right: calc(-1 * var(--gut)); padding-right: var(--gut); }
+  .app .fr-try .examples::-webkit-scrollbar { display: none; }
+  .app .fr-try .examples li { flex: none; }
+  .app .fr-try .example, .app .fr-try-label { height: 40px; }
+  .app .composer-input::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .app .crumbs { position: relative; gap: 6px; }
+  /* the plan's name is on the results card; the row keeps the two buttons */
+  .app .fu-context { display: none; }
+  .app .fu-actions { flex: 1; gap: 8px; margin-left: 0; }
+  .app .fu-actions > *, .app .fu-menu > .btn { flex: 1; width: 100%; }
+  .app .fu-menu { position: static; }
+  .app .fu-list { left: 0; right: 0; width: auto; max-height: 44dvh; }
+  .app .timestrip.timestrip { gap: 2px; padding: 4px 8px 6px; }
+  .app .ts-now .clock { min-width: 0; }
+  .app .ts-row-2 { flex-wrap: nowrap; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+  .app .ts-row-2::-webkit-scrollbar { display: none; }
+  .app .ts-group { flex: none; }
+  .app .timestrip .seg-sm .seg-btn { height: 28px; padding: 0 7px; font-size: 12px; }
+
+  /* run panel and results card: above the dock, up to the control bar; the open breakdown takes the full height */
+  .app .rp { bottom: var(--m-bottom); left: var(--gut); right: var(--gut); }
+  .app .rp-card { max-height: min(46dvh, calc(100dvh - var(--top) - 8px - var(--m-bottom))); }
+  .app .results { top: auto; bottom: var(--m-bottom); left: var(--gut); right: var(--gut); width: auto; max-height: calc(100dvh - var(--top) - 8px - var(--m-bottom)); }
+  .app .results[data-details="true"] { z-index: 7; max-height: calc(100dvh - var(--gut) - var(--m-bottom)); }
+  /* the open card covers the map, so the run summary and the replay's second row wait until it is closed */
+  .app:has(> .results) .rp, .app:has(> .results) .ts-row-2 { display: none; }
+  .app:has(.note) .results { max-height: calc(70dvh - var(--top) - 8px - var(--m-bottom)); }
+  .app .results-chip { top: var(--top); margin-top: 8px; }
+  .app .results-head { padding: 14px 8px 0 16px; }
+  .app .verdict-headline { padding: 8px 16px 0; font-size: 15px; line-height: 22px; }
+  .app .verdict-reason { padding: 4px 16px 0; }
+  .app .results-tests { padding: 10px 16px 0; }
+  .app .test { min-height: 40px; padding: 6px 0; }
+  .app .results-foot { padding: 10px 8px 10px 16px; }
+  .app .tabs { padding: 0 6px; }
+  .app .pane { padding: 14px 16px 16px; }
+  .app .chat { padding: 12px 16px; }
+}
