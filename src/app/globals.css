@@ -143,6 +143,7 @@ textarea, input { caret-color: var(--accent); }
 .app:has(.crumbs):has(.timestrip) { --reserve: 268px; }
 .map-stage, .map-canvas { position: absolute; inset: 0; }
 .map-stage { background: #15171b; }
+.map-3d-loading { position: absolute; z-index: 2; top: 50%; left: 50%; transform: translate(-50%, -50%); margin: 0; padding: 10px 16px; border: 1px solid var(--rule); border-radius: 8px; background: var(--paper); color: var(--ink-2); font-size: 14px; pointer-events: none; }
 .map-loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); font-size: 14px; }
 
 /* top-left: wordmark, Atlanta today, run panel slot */

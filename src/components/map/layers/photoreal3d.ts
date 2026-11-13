@@ -21,7 +21,7 @@ export const TILESET_BUDGET: Record<Quality3d, Record<string, number | boolean>>
   high: { maximumScreenSpaceError: 12, maximumMemoryUsage: 256, memoryCacheOverflow: 64, memoryAdjustedScreenSpaceError: true, throttleRequests: true, maxRequests: 24 },
 };
 
-export function photorealLayer(key: string, onCredits: (credits: string) => void, visible = true, quality: Quality3d = "low") {
+export function photorealLayer(key: string, onCredits: (credits: string) => void, visible = true, quality: Quality3d = "low", onTileLoad?: () => void) {
   return new Tile3DLayer({
     // id includes the quality: changing it rebuilds the tileset with the new budget.
     id: `google-photoreal-3d-${quality}`,
@@ -29,6 +29,10 @@ export function photorealLayer(key: string, onCredits: (credits: string) => void
     loadOptions: { fetch: { headers: { "X-GOOG-API-KEY": key } }, tileset: TILESET_BUDGET[quality] },
     operation: "draw", // overlays carry baked elevation; no terrain source needed
     visible,
+    // Only tiles with geometry count: the root tiles are empty and arrive before anything is drawn.
+    onTileLoad: (tile) => {
+      if (tile.type === "scenegraph") onTileLoad?.();
+    },
     onTilesetLoad: (tileset: Tileset3D) => {
       let last = "";
       tileset.options.onTraversalComplete = (selected) => {

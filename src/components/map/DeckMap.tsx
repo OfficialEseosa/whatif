@@ -207,10 +207,13 @@ export default function DeckMap() {
   // frame) meant hundreds of tile layers were updated per frame. Same instance => no prop change.
   // The 3D tileset is only created while photoreal is selected and is destroyed when leaving it.
   const show3dTiles = photoreal && !!GOOGLE_KEY;
+  // The first 3D tiles take a few seconds; until one arrives the view is black, so say what is happening.
+  const [loaded3d, setLoaded3d] = useState<string | null>(null);
   const tiles3d = useMemo(
-    () => (show3dTiles ? photorealLayer(GOOGLE_KEY, setCredits3d, !underground, quality3d) : null),
+    () => (show3dTiles ? photorealLayer(GOOGLE_KEY, setCredits3d, !underground, quality3d, () => setLoaded3d(quality3d)) : null),
     [show3dTiles, underground, quality3d],
   );
+  const loading3d = p3d && loaded3d !== quality3d;
   const google2dOn = !photoreal && !!GOOGLE_KEY && !!session;
   const tiles2d = useMemo(() => (google2dOn ? google2dLayer(session!, GOOGLE_KEY, surfaceOpacity) : null), [google2dOn, session, surfaceOpacity]);
 
@@ -289,6 +292,11 @@ export default function DeckMap() {
         effects={[LIGHTING]}
         getTooltip={tooltip}
       />
+      {loading3d && (
+        <p className="map-3d-loading" role="status">
+          Loading the 3D city
+        </p>
+      )}
     </div>
   );
 }

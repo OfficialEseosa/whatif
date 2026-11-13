@@ -7,6 +7,7 @@
  */
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { cancelRun, useBuildFlow } from "@/hooks/useBuildFlow";
+import type { ScenarioEdit } from "@/lib/contract";
 import { selectActiveRun, useStore, type PipelineStep, type RunRecord } from "@/lib/store";
 import { ChevronDownIcon } from "../icons";
 import { focusComposer } from "../uiStore";
@@ -215,7 +216,7 @@ function StepLine({ step, run, elapsed, onRetry }: { step: PipelineStep; run: Ru
       if (active) return <p className="rp-line">{run.overrideEdit ? "Loading the suggested option" : "Working out what you asked for"}</p>;
       return (
         <>
-          {run.previousEdit && <p className="rp-line">Changing {run.previousEdit.name}</p>}
+          {run.previousEdit && (!e || changesPlan(e, run.previousEdit)) && <p className="rp-line">Changing {run.previousEdit.name}</p>}
           {e && <p className="rp-line">{planLine(e)}</p>}
           {run.planSource === "alternative" && <p className="rp-line">From a suggested option</p>}
           {run.planSource === "restored" && <p className="rp-line">Reopened from earlier</p>}
@@ -315,4 +316,11 @@ function PromptQuote({ text }: { text: string }) {
       )}
     </div>
   );
+}
+
+/** True when the plan that was read builds on the previous one (same line or a shared stop), not a new plan typed over it. */
+function changesPlan(e: ScenarioEdit, prev: ScenarioEdit): boolean {
+  if (e.baseLineId && e.baseLineId === prev.baseLineId) return true;
+  const names = new Set(prev.stops.map((s) => s.name));
+  return e.stops.some((s) => names.has(s.name));
 }
