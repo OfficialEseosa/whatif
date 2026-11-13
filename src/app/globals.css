@@ -1,11 +1,53 @@
 @import "tailwindcss";
 
 /*
- * Design tokens. The map fills the screen and every control floats on it, the way Google Earth does.
- * Map colors live in src/components/map/colors.ts (deck.gl needs RGBA arrays).
+ * Design tokens: "Timetable" direction. Opaque warm-paper panels, 1px ink rules, one accent (Signal blue),
+ * gain/loss/history as the only other colors. Map colors live in src/components/map/colors.ts.
  */
 :root {
-  --ink: #0e1013;
+  /* surfaces */
+  --paper: #f6f3ec;
+  --paper-2: #ece8dd;
+  --paper-3: #e2ddcf;
+  /* text and rules */
+  --ink: #15181c;
+  --ink-2: #4a4f57;
+  --rule: #15181c;
+  --rule-soft: #cfc9ba;
+  /* accent */
+  --accent: #2438f0;
+  --accent-hover: #1a2bd0;
+  --on-accent: #ffffff;
+  --accent-fill: #dfe3fd;
+  /* meaning */
+  --gain: #0b7a4b;
+  --gain-fill: #d5eedf;
+  --loss: #c42b1c;
+  --loss-fill: #f7d9d4;
+  --neutral: #6b7078;
+  --neutral-fill: #e4e1d8;
+  --fair: #8a5a00;
+  --fair-fill: #f6e7c4;
+  --history: #6a3fa0;
+  --history-fill: #e9dff4;
+  --mock: #8a5a00;
+  /* type (set by next/font in layout.tsx) */
+  --font-display: var(--font-bricolage), "Arial Narrow", system-ui, sans-serif;
+  --font-body: var(--font-instrument), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "Cascadia Mono", monospace;
+  /* shape and motion */
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-lg: 10px;
+  --shadow-hard: 4px 4px 0 rgba(21, 24, 28, 0.18);
+  --shadow-lift: 6px 6px 0 rgba(21, 24, 28, 0.22);
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease-panel: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 160ms;
+  --t-panel: 280ms;
+
+  /* legacy names, removed once every rule below uses the tokens above */
+  --ink-legacy: #0e1013;
   --surface: rgba(32, 33, 36, 0.92);
   --surface-raised: rgba(255, 255, 255, 0.06);
   --surface-hover: rgba(255, 255, 255, 0.1);
@@ -26,7 +68,6 @@
   --dock-h: 48px;
   --status-h: 26px;
   --below: calc(var(--status-h) + var(--dock-h) + 20px);
-  --font-body: var(--font-dm-sans), "Google Sans", system-ui, sans-serif;
   color-scheme: dark;
 }
 
