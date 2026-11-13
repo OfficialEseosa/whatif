@@ -128,11 +128,14 @@ export default function DeckMap() {
   const liveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fly = useCallback((to: Partial<MapViewState>, ms: number, threeD: boolean) => {
     const maxPitch = threeD ? MAX_PITCH_3D : MAX_PITCH;
+    const next = { ...live.current, ...to, pitch: Math.min(maxPitch, to.pitch ?? live.current.pitch ?? 0), maxPitch };
+    if (!ms) {
+      live.current = next as MapViewState;
+      const m = next as MapViewState & { height?: number };
+      useStore.getState().set({ live: { longitude: m.longitude, latitude: m.latitude, zoom: m.zoom, pitch: m.pitch ?? 0, bearing: m.bearing ?? 0, height: m.height || window.innerHeight } });
+    }
     setIvs({
-      ...live.current,
-      ...to,
-      pitch: Math.min(maxPitch, to.pitch ?? live.current.pitch ?? 0),
-      maxPitch,
+      ...next,
       position: [0, 0, threeD ? PHOTOREAL_TARGET_Z : 0],
       transitionDuration: ms,
       transitionInterpolator: new FlyToInterpolator(),

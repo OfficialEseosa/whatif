@@ -22,9 +22,10 @@ export class WhatIfController extends MapController {
       const dx = src.deltaX || 0;
       const dy = src.deltaX ? src.deltaY || 0 : 0;
       const turn = dx || src.deltaY || 0;
+      const pos = this.getCenter(event as unknown as Parameters<MapController["getCenter"]>[0]);
       const state = this.controllerState
-        .rotateStart({ pos: undefined as unknown as [number, number] })
-        .rotate({ deltaAngleX: -turn * WHEEL_BEARING_PER_PX, deltaAngleY: -dy * WHEEL_PITCH_PER_PX })
+        .rotateStart({ pos })
+        .rotate({ pos: undefined, deltaAngleX: -turn * WHEEL_BEARING_PER_PX, deltaAngleY: -dy * WHEEL_PITCH_PER_PX })
         .rotateEnd();
       this.updateViewport(state, { transitionDuration: 0 }, { isRotating: false });
       return true;
