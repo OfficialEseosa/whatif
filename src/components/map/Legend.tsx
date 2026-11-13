@@ -11,6 +11,9 @@ const ITEMS: [string, RGBA][] = [
   ["Slower commutes / more traffic", MAP_COLORS.loss],
   ["Rent pressure zone", MAP_COLORS.rentPressure],
   ["History overlay", MAP_COLORS.history],
+  ["Rail in tunnel (dashed)", MAP_COLORS.tunnel],
+  ["MARTA train*", MAP_COLORS.martaTrain],
+  ["Streetcar*", MAP_COLORS.streetcarVehicle],
 ];
 
 export function Legend() {
@@ -22,6 +25,7 @@ export function Legend() {
           {label}
         </li>
       ))}
+      <li className="muted">* vehicles use placeholder headways</li>
     </ul>
   );
 }

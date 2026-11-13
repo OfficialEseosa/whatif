@@ -68,4 +68,8 @@ deck.gl only (no MapLibre/Mapbox), client-only via `next/dynamic` (`ssr: false`)
 - **Photoreal 3D**: Google Photorealistic 3D Tiles via `Tile3DLayer` when the key is set; otherwise the keyless map, tilted.
 - Google attribution is shown whenever Google tiles are on screen; otherwise "© OpenStreetMap contributors".
 
+- **Photoreal overlays** use deck.gl `TerrainExtension` (offset mode for paths/points, drape for fills) with the 3D tiles as terrain, so buildings occlude them. The camera target is lifted 270 m (ellipsoidal ground height) so steep close-ups stay above the mesh. Free orbit: right-drag or Ctrl-drag rotates/tilts up to 85°; the compass resets north.
+- **Vehicles**: MARTA trains and streetcars run along the rail (and the proposed line once built), positioned from headway and speed and tied to the scrubber. Headways/speeds are **placeholders** (`VEHICLE_SERVICE` in `layers/vehicles.ts`) until the sim exports GTFS headways.
+- **Underground**: `network.json` rail carries OSM `tunnel`/`bridge`/`layer` tags (optional `RailLine.structures` / `layers`). Tunnels are dashed; the Underground toggle fades the 2D basemap, or in photoreal hides the 3D tiles and shows tunnels at approximate depth over a flat road wireframe.
+
 Build it: `/api/plan` → pipeline steps → `/api/simulate` → the line draws → agents switch from baseline to proposed trips → panels fill. The scrubber drives `TripsLayer.currentTime`; history cards switch on overlays; Year 5/10 fades at-risk agents and shows the rent-pressure zone.

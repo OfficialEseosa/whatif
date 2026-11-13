@@ -180,6 +180,10 @@ export const RailLineSchema = z.object({
   kind: RailKindSchema,
   /** One line = many OSM ways; each is its own polyline. */
   paths: z.array(PathSchema),
+  /** Optional (1.1.0), parallel to `paths`: OSM tunnel / bridge tags ("grade" = neither). */
+  structures: z.array(z.enum(["tunnel", "bridge", "grade"])).optional(),
+  /** Optional (1.1.0), parallel to `paths`: OSM `layer` (negative = below ground), 0 when untagged. */
+  layers: z.array(z.number().int()).optional(),
 });
 export type RailLine = z.infer<typeof RailLineSchema>;
 

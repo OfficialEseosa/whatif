@@ -3,7 +3,7 @@ import { _TerrainExtension as TerrainExtension } from "@deck.gl/extensions"; // 
 import type { Position } from "@deck.gl/core";
 import type { LngLat } from "@/lib/contract";
 
-const TERRAIN = new TerrainExtension();
+export const TERRAIN = new TerrainExtension();
 
 /**
  * Photoreal view: overlays sit on Google's 3D tiles via deck.gl TerrainExtension (the Tile3DLayer

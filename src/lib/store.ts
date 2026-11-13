@@ -67,6 +67,8 @@ type State = {
   horizon: Horizon;
   tab: ResultsTab;
   activeHistoryId: string | null;
+  /** Fade the surface to show tunnels and trains below ground. */
+  underground: boolean;
   highlightZone: ZoneKind | null;
   /** 0..1 build animation of the proposed line. */
   lineProgress: number;
@@ -102,6 +104,7 @@ export const useStore = create<State & Actions>((set) => ({
   horizon: "opening",
   tab: "verdict",
   activeHistoryId: null,
+  underground: false,
   highlightZone: null,
   lineProgress: 0,
   switchProgress: 0,

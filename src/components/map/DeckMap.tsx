@@ -10,7 +10,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import DeckGL from "@deck.gl/react";
-import { FlyToInterpolator, type MapViewState, type PickingInfo } from "@deck.gl/core";
+import { FlyToInterpolator, type Layer, type MapViewState, type PickingInfo } from "@deck.gl/core";
 import { INITIAL_CAMERA, useStore, selectMapScenario } from "@/lib/store";
 import { api } from "@/lib/api";
 import { keylessRoadsLayer } from "./layers/keylessBasemap";
@@ -25,6 +25,8 @@ import { historyOverlayLayers } from "./layers/historyOverlay";
 import { buildGeometry, proposedLineLayers } from "./layers/proposedLine";
 import { buildTripData, tripsLayer } from "./layers/trips";
 import { atRiskLayer } from "./layers/atRisk";
+import { vehicleLayers, vehiclesAt } from "./layers/vehicles";
+import { buildRailChains, chainFromPath } from "./railGeometry";
 
 const GOOGLE_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
 const MAX_PITCH = 85;
@@ -47,10 +49,13 @@ export default function DeckMap() {
   const switchProgress = useStore((s) => s.switchProgress);
   const highlightZone = useStore((s) => s.highlightZone);
   const activeHistory = useStore((s) => s.history.find((h) => h.id === s.activeHistoryId) ?? null);
+  const underground = useStore((s) => s.underground);
 
   const photoreal = view === "photoreal";
   /** Overlays use the 3D-tiles terrain only when the tiles are actually there. */
-  const p3d = photoreal && !!GOOGLE_KEY;
+  /** Underground in photoreal hides the tiles and shows a flat road "wireframe" with tunnels at depth. */
+  const p3d = photoreal && !!GOOGLE_KEY && !underground;
+  const depth3d = photoreal && underground;
   const [session, setSession] = useState<string | null>(null);
   const [credits3d, setCredits3d] = useState("");
   const [credits2d, setCredits2d] = useState("");
@@ -91,12 +96,21 @@ export default function DeckMap() {
   const agents = scenario?.agents;
   const tripData = useMemo(() => (agents ? buildTripData(agents, switchStep, horizon) : []), [agents, switchStep, horizon]);
   const geom = useMemo(() => (built && scenario ? buildGeometry(scenario, network) : null), [built, scenario, network]);
+  const railChains = useMemo(() => (network ? buildRailChains(network) : []), [network]);
+  const lineChain = useMemo(
+    () => (geom && geom.kind === "transit" ? { ...chainFromPath("proposed", "streetcar", geom.path), service: "proposed" as const, headwayMin: scenario?.edit.headwayMin } : null),
+    [geom, scenario],
+  );
+  const surfaceOpacity = underground ? 0.18 : 1;
 
-  const layers = [];
+  const layers: Layer[] = [];
   // --- basemap (the dense all-roads layer is skipped in photoreal: the photo shows the streets)
-  if (p3d) layers.push(photorealLayer(GOOGLE_KEY, setCredits3d));
-  else if (!photoreal && GOOGLE_KEY && session) layers.push(google2dLayer(session, GOOGLE_KEY));
-  else if (network) layers.push(keylessRoadsLayer(network, built));
+  // Keep the 3D tiles mounted while Underground hides them, so toggling back needs no reload.
+  if (photoreal && GOOGLE_KEY) layers.push(photorealLayer(GOOGLE_KEY, setCredits3d, !underground));
+  if (!p3d) {
+    if (!photoreal && GOOGLE_KEY && session) layers.push(google2dLayer(session, GOOGLE_KEY, surfaceOpacity));
+    else if (network) layers.push(keylessRoadsLayer(network, built, underground ? 0.15 : undefined));
+  }
   // --- analysis layers
   if (built && scenario) layers.push(...tractsLayers(scenario.tracts, { opacity: switchProgress, photoreal: p3d, bbox: network?.bbox }));
   if (network && activeHistory) layers.push(...historyOverlayLayers(network, activeHistory.overlay, p3d));
@@ -104,14 +118,21 @@ export default function DeckMap() {
     const hl = highlightZone === "spillover" ? scenario.whoPays.items.find((i) => i.zone === "spillover" && i.roadIds)?.roadIds : undefined;
     layers.push(spilloverLayer(network, scenario.roads, { opacity: switchProgress, highlightIds: hl, photoreal: p3d }));
   }
-  if (network) layers.push(beltlineLayer(network, p3d), ...railLayers(network, p3d));
+  if (network) layers.push(beltlineLayer(network, p3d), ...railLayers(network, p3d, underground, p3d || depth3d));
   if (built && scenario && (tab === "whoPays" || horizon !== "opening" || highlightZone === "rent_pressure"))
     layers.push(rentPressureLayer(scenario.tracts, p3d));
   if (geom) layers.push(...proposedLineLayers(geom, lineProgress, p3d));
-  if (tripData.length) layers.push(tripsLayer(tripData, time, p3d));
+  if (tripData.length && !underground) layers.push(tripsLayer(tripData, time, p3d));
+  // vehicles: existing rail always; the proposed line once it has finished drawing
+  const runChains = lineChain && lineProgress >= 1 ? [...railChains, lineChain] : railChains;
+  if (runChains.length) layers.push(...vehicleLayers(vehiclesAt(runChains, time), { photoreal: p3d, underground, depth: p3d || depth3d }));
   if (built && scenario && horizon !== "opening") layers.push(atRiskLayer(scenario.agents, horizon, p3d));
 
-  const googleOnScreen = !!GOOGLE_KEY && (photoreal || !!session);
+  // deck.gl can't add/remove extensions (TerrainExtension) on a live layer, so overlays get a
+  // mode-specific id: switching views recreates them instead of silently drawing under the mesh.
+  const sfx = p3d ? "@3d" : depth3d ? "@ug" : "";
+  const finalLayers = layers.map((l) => (sfx && !l.id.startsWith("google-") ? l.clone({ id: `${l.id}${sfx}` }) : l));
+  const googleOnScreen = p3d || (!photoreal && !!GOOGLE_KEY && !!session);
   const credits = photoreal ? credits3d : credits2d;
   const bearing = viewState.bearing ?? 0;
 
@@ -121,7 +142,7 @@ export default function DeckMap() {
         viewState={{ ...viewState, position: [0, 0, p3d ? PHOTOREAL_TARGET_Z : 0] }}
         onViewStateChange={({ viewState: v }) => setViewState({ ...(v as MapViewState), maxPitch: MAX_PITCH })}
         controller={{ dragRotate: true, touchRotate: true, keyboard: true, inertia: 300 }}
-        layers={layers}
+        layers={finalLayers}
         getTooltip={tooltip}
       />
       <div className="map-ui map-ui-compass row gap-sm">

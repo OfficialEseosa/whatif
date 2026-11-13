@@ -134,8 +134,11 @@ for (const w of ways) {
   } else if (t.railway === "rail") {
     id = "freight"; name = "Freight rail (CSX / Norfolk Southern)"; kind = "freight";
   } else continue;
-  if (!railGroups.has(id)) railGroups.set(id, { id, name, kind, paths: [] });
-  railGroups.get(id).paths.push(simplify(geom(w), 0.004).map(r5));
+  if (!railGroups.has(id)) railGroups.set(id, { id, name, kind, paths: [], structures: [], layers: [] });
+  const g = railGroups.get(id);
+  g.paths.push(simplify(geom(w), 0.004).map(r5));
+  g.structures.push(t.tunnel && t.tunnel !== "no" && t.tunnel !== "building_passage" ? "tunnel" : t.bridge && t.bridge !== "no" ? "bridge" : "grade");
+  g.layers.push(parseInt(t.layer, 10) || 0);
 }
 const rail = [...railGroups.values()].sort((a, b) => a.id.localeCompare(b.id));
 
