@@ -1,26 +1,34 @@
-// Re-downloads the OSM snapshot used by make-mock-scenario.mjs.
+// Re-downloads the OSM snapshot used by make-mock-scenario.mjs (network.json is built from it).
 // Usage: npm run fetch:osm   (writes scripts/data/osm-atl-core.json)
-// The snapshot is committed so the mock is reproducible offline; only re-run
-// this if you want fresher geometry or a different box.
+// Boxes come from src/lib/geo.ts: STUDY_BBOX gets motorway..secondary roads, all rail, stations and
+// the Beltline; CORE_BBOX additionally gets tertiary roads and the named corridor streets.
+// The snapshot is committed so the mock is reproducible offline.
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const { STUDY_BBOX, CORE_BBOX } = await import(pathToFileURL(path.join(ROOT, "src/lib/geo.ts")).href);
 const OUT = path.join(ROOT, "scripts/data/osm-atl-core.json");
-const BBOX = "33.73,-84.42,33.80,-84.33"; // south,west,north,east
+const ov = (b) => `${b[1]},${b[0]},${b[3]},${b[2]}`; // south,west,north,east
+const WIDE = ov(STUDY_BBOX);
+const CORE = ov(CORE_BBOX);
 
 const query = `
-[out:json][timeout:120];
+[out:json][timeout:180];
 (
-  way["highway"~"^(motorway|trunk|primary|secondary|tertiary|motorway_link|trunk_link)$"](${BBOX});
-  way["highway"]["name"~"^(Edgewood Avenue|Auburn Avenue|Irwin Street|Krog Street|Jackson Street)"](${BBOX});
-  way["railway"~"^(subway|light_rail|tram|rail)$"](${BBOX});
-  way["name"~"Beltline|BeltLine|Eastside Trail|Westside Trail|Northside Trail|Southside Trail"](${BBOX});
-  node["railway"="station"](${BBOX});
-  node["railway"="tram_stop"](${BBOX});
-  node["public_transport"="station"](${BBOX});
-  nwr["name"="Ponce City Market"](${BBOX});
+  way["highway"~"^(motorway|trunk|primary|secondary|motorway_link|trunk_link)$"](${WIDE});
+  way["highway"="tertiary"](${CORE});
+  way["highway"]["name"~"^(Edgewood Avenue|Auburn Avenue|Irwin Street|Krog Street|Jackson Street)"](${CORE});
+  way["railway"~"^(subway|light_rail|tram|rail)$"](${WIDE});
+  way["name"~"Beltline|BeltLine|Eastside Trail|Westside Trail|Northside Trail|Southside Trail"](${WIDE});
+  node["railway"="station"](${WIDE});
+  node["railway"="tram_stop"](${WIDE});
+  node["public_transport"="station"](${WIDE});
+  nwr["name"="Ponce City Market"](${CORE});
+  nwr["aeroway"="terminal"](${WIDE});
+  nwr["place"~"^(city|town|suburb|neighbourhood)$"]["name"~"^(Clarkston|Decatur|Avondale Estates|East Lake|Kirkwood|Druid Hills)$"](${WIDE});
+  nwr["name"~"^(Emory University|Centers for Disease Control|Decatur Square|Clarkston City Hall)"](${WIDE});
 );
 out geom tags;
 `;
@@ -33,4 +41,4 @@ const res = await fetch("https://overpass-api.de/api/interpreter", {
 if (!res.ok) throw new Error(`Overpass ${res.status}`);
 const json = await res.json();
 fs.writeFileSync(OUT, JSON.stringify(json));
-console.log(`wrote ${OUT} (${json.elements.length} elements)`);
+console.log(`wrote ${OUT} (${json.elements.length} elements, ${(fs.statSync(OUT).size / 1e6).toFixed(1)} MB)`);

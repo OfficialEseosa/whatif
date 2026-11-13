@@ -9,7 +9,7 @@ import type { Position } from "@deck.gl/core";
 import type { LngLat, Network, RailKind, Station } from "@/lib/contract";
 import { MAP_COLORS, withAlpha, type RGBA } from "../colors";
 import { structureZ, type Structure } from "../railGeometry";
-import { LIFT_M, TERRAIN, terrainProps } from "./common";
+import { LIFT_M, ground, liftPoint, terrainProps } from "./common";
 
 type Seg = { path: LngLat[]; kind: RailKind; structure: Structure; z: number };
 const DASH = new PathStyleExtension({ dash: true });
@@ -19,23 +19,40 @@ function baseColor(d: Seg): RGBA {
 }
 
 /** `photoreal` = draped on 3D tiles; `depth` = draw tunnels/bridges at their z (photoreal or Underground 3D). */
-export function railLayers(network: Network, photoreal: boolean, underground = false, depth = photoreal) {
-  const segs: Seg[] = network.rail.flatMap((l) =>
-    l.paths.map((path, i) => {
-      const structure = (l.structures?.[i] ?? "grade") as Structure;
-      return { path, kind: l.kind, structure, z: structureZ(structure, l.layers?.[i] ?? 0) };
-    }),
-  );
-  const toPath = (d: Seg): Position[] => d.path.map((p) => [p[0], p[1], depth ? d.z + (photoreal ? LIFT_M.rail : 0) : 0]);
+// Stable per-network data so deck.gl doesn't rebuild attributes on every frame.
+const segCache = new WeakMap<Network, { surface: Seg[]; tunnels: Seg[] }>();
+function segsFor(network: Network) {
+  let c = segCache.get(network);
+  if (!c) {
+    const all: Seg[] = network.rail.flatMap((l) =>
+      l.paths.map((path, i) => {
+        const structure = (l.structures?.[i] ?? "grade") as Structure;
+        return { path, kind: l.kind, structure, z: structureZ(structure, l.layers?.[i] ?? 0) };
+      }),
+    );
+    c = { surface: all.filter((d) => d.structure !== "tunnel"), tunnels: all.filter((d) => d.structure === "tunnel") };
+    segCache.set(network, c);
+  }
+  return c;
+}
+
+export type RailVisibility = { martaRail: boolean; streetcar: boolean; freight: boolean; tunnels: boolean; stations: boolean };
+
+export function railLayers(network: Network, photoreal: boolean, underground = false, depth = photoreal, vis: RailVisibility = { martaRail: true, streetcar: true, freight: true, tunnels: true, stations: true }) {
+  const { surface: allSurface, tunnels: allTunnels } = segsFor(network);
+  const keep = (d: Seg) => (d.kind === "streetcar" ? vis.streetcar : d.kind === "freight" ? vis.freight : vis.martaRail);
+  // photoreal: ground + structure (bridge/tunnel) + lift; Underground 3D without tiles: structure z only.
+  const toPath = (d: Seg): Position[] => d.path.map((p) => [p[0], p[1], depth ? d.z + (photoreal ? LIFT_M.rail + ground(p[0], p[1]) : 0) : 0]);
   const color = (d: Seg): RGBA => {
     if (d.structure !== "tunnel") return underground ? withAlpha(baseColor(d), 110) : baseColor(d);
     return underground ? MAP_COLORS.tunnel : withAlpha(MAP_COLORS.tunnel, 120);
   };
-  const surface = segs.filter((d) => d.structure !== "tunnel");
-  const tunnels = segs.filter((d) => d.structure === "tunnel");
+  const surface = vis.martaRail && vis.streetcar && vis.freight ? allSurface : allSurface.filter(keep);
+  const tunnels = vis.tunnels ? allTunnels : [];
+  const visKey = `${+vis.martaRail}${+vis.streetcar}${+vis.freight}`;
   return [
     new PathLayer<Seg>({
-      id: "rail",
+      id: `rail-${visKey}`,
       data: surface,
       getPath: toPath,
       getColor: color,
@@ -58,12 +75,12 @@ export function railLayers(network: Network, photoreal: boolean, underground = f
       updateTriggers: { getPath: [photoreal, depth], getColor: underground, getWidth: underground },
       ...terrainProps(photoreal, "offset", underground),
       ...(depth && !photoreal && underground ? { parameters: { depthCompare: "always" as const } } : {}),
-      extensions: photoreal ? [DASH, TERRAIN] : [DASH],
+      extensions: [DASH],
     }),
     new ScatterplotLayer<Station>({
       id: "stations",
-      data: network.stations,
-      getPosition: (d) => [d.coord[0], d.coord[1], photoreal ? LIFT_M.stops : 0],
+      data: vis.stations ? network.stations : [],
+      getPosition: (d) => liftPoint(d.coord, photoreal ? LIFT_M.stops : 0),
       getRadius: (d) => (d.kind === "marta_station" ? 5 : 3),
       radiusUnits: "pixels",
       stroked: true,

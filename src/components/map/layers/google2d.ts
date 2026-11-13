@@ -1,6 +1,5 @@
 /**
- * Google Map Tiles API 2D satellite tiles with labels (Analysis view when a key is present),
- * dimmed so the analysis layers read on top.
+ * Google Map Tiles API 2D roadmap tiles (Analysis view when a key is present).
  * Session token comes from /api/map-session. UNTESTED without a key.
  */
 import { TileLayer } from "@deck.gl/geo-layers";
@@ -20,7 +19,6 @@ export function google2dLayer(session: string, key: string, opacity = 1) {
         data: undefined,
         image: props.data,
         bounds: [boundingBox[0][0], boundingBox[0][1], boundingBox[1][0], boundingBox[1][1]],
-        tintColor: [132, 142, 160],
       });
     },
   });

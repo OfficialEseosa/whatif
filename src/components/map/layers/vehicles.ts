@@ -2,14 +2,16 @@
  * Schedule-shaped vehicles: MARTA trains and streetcars running along the rail chains (and the
  * proposed line once built), positioned from headway + speed and tied to the time scrubber.
  *
- * PLACEHOLDER headways/speeds (not from GTFS): the sim's GTFS headways aren't exported to the
- * frontend yet. Replace VEHICLE_SERVICE when they are.
+ * Headways come from the sim's GTFS export (public/scenarios/transit-service.sim.json, 7-9 AM, per
+ * network line id) when it is present; otherwise the labelled PLACEHOLDER values in VEHICLE_SERVICE.
+ * Speeds and train lengths are always placeholders.
  */
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import type { RailKind } from "@/lib/contract";
 import { MAP_COLORS, withAlpha, type RGBA } from "../colors";
 import { sliceChain, type RailChain, type Structure } from "../railGeometry";
-import { LIFT_M, terrainProps } from "./common";
+import { LIFT_M, ground, terrainProps } from "./common";
+import type { Headways } from "../transitService";
 
 export const VEHICLE_SERVICE: Record<"marta_heavy_rail" | "streetcar" | "proposed", { headwayMin: number; kmh: number; lengthKm: number }> = {
   marta_heavy_rail: { headwayMin: 10, kmh: 45, lengthKm: 0.15 }, // placeholder: ~10 min peak per line
@@ -24,11 +26,11 @@ function serviceFor(kind: RailKind | "proposed") {
 }
 
 /** Vehicle positions at `timeSec` (seconds after 6:00 AM). */
-export function vehiclesAt(chains: (RailChain & { service?: "proposed"; headwayMin?: number })[], timeSec: number): Vehicle[] {
+export function vehiclesAt(chains: (RailChain & { service?: "proposed"; headwayMin?: number })[], timeSec: number, headways?: Headways | null): Vehicle[] {
   const out: Vehicle[] = [];
   chains.forEach((c, ci) => {
     const svc = serviceFor(c.service ?? c.kind);
-    const headway = c.headwayMin ?? svc.headwayMin;
+    const headway = c.headwayMin ?? headways?.[c.lineId] ?? svc.headwayMin;
     const spacing = (svc.kmh * headway) / 60; // km between vehicles
     const n = Math.max(1, Math.floor(c.lengthKm / spacing));
     const travelled = ((timeSec / 3600) * svc.kmh + ci * 0.37) % c.lengthKm; // stagger chains
@@ -47,8 +49,8 @@ export function vehiclesAt(chains: (RailChain & { service?: "proposed"; headwayM
 
 export function vehicleLayers(vehicles: Vehicle[], opts: { photoreal: boolean; underground: boolean; depth?: boolean }) {
   const depth = opts.depth ?? opts.photoreal;
-  const lift = opts.photoreal ? LIFT_M.vehicles : 0;
-  const z = (p: [number, number, number]): [number, number, number] => [p[0], p[1], depth ? p[2] + lift : 0];
+  const lift = opts.photoreal ? LIFT_M.rail : 0;
+  const z = (p: [number, number, number]): [number, number, number] => [p[0], p[1], depth ? p[2] + (opts.photoreal ? lift + ground(p[0], p[1]) : 0) : 0];
   // Below-ground vehicles are dimmed unless Underground mode is on.
   const color = (v: Vehicle) => (v.structure === "tunnel" && !opts.underground ? withAlpha(v.color, 90) : v.color);
   const terrain = { ...terrainProps(opts.photoreal, "offset", opts.underground), ...(depth && !opts.photoreal && opts.underground ? { parameters: { depthCompare: "always" as const } } : {}) };

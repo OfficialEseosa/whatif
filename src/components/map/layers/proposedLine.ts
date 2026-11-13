@@ -6,7 +6,7 @@ import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import type { Position } from "@deck.gl/core";
 import type { LngLat, Network, ScenarioResult, Stop } from "@/lib/contract";
 import { MAP_COLORS } from "../colors";
-import { LIFT_M, cumulativeFractions, lift, partialPath, terrainProps } from "./common";
+import { LIFT_M, cumulativeFractions, lift, liftPoint, partialPath, terrainProps } from "./common";
 
 export type BuildGeometry = { path: LngLat[]; stops: Stop[]; kind: "transit" | "road" };
 
@@ -73,7 +73,7 @@ export function proposedLineLayers(geom: BuildGeometry, progress: number, photor
     // construction head while drawing
     new ScatterplotLayer<{ p: number[] }>({
       id: "proposed-build-head",
-      data: progress < 1 && tip ? [{ p: [tip[0], tip[1], z] }] : [],
+      data: progress < 1 && tip ? [{ p: liftPoint([tip[0], tip[1]], z) as unknown as number[] }] : [],
       getPosition: (d) => d.p as [number, number, number],
       getRadius: 9 * scale,
       radiusUnits: "pixels",
@@ -86,7 +86,7 @@ export function proposedLineLayers(geom: BuildGeometry, progress: number, photor
     new ScatterplotLayer<StopD>({
       id: "proposed-stops",
       data: stops,
-      getPosition: (d) => [d.coord[0], d.coord[1], photoreal ? LIFT_M.stops : 0],
+      getPosition: (d) => liftPoint(d.coord, photoreal ? LIFT_M.stops : 0),
       getRadius: (d) => (progress >= d.at - 0.01 ? 7 * scale : 0),
       radiusUnits: "pixels",
       stroked: true,
