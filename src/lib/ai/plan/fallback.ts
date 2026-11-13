@@ -393,6 +393,7 @@ export function fallbackEdit(text: string, opts: FallbackOptions = {}): Scenario
     const ids = [...new Set(mentions.flatMap((m) => m.roadIds))];
     roadNames = mentions.map((m) => m.displayName);
     if (ids.length > 0) roadIds = ids;
+    else if (type === "brt_lane" && stops.length >= 2) assumptions.push("No road named; the bus lane follows the street route between the stops.");
     else assumptions.push("No road in the network matched a name in the text; roadIds omitted.");
   } else {
     // Still mark road mentions as covered so they are not reported as unknown places.

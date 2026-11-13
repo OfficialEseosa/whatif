@@ -12,9 +12,9 @@ contract-shaped `ScenarioResult` JSON for the Next.js frontend.
 |---|---|
 | `extend_line` | runs (prebaked `beltline-streetcar.sim.json`, live) |
 | `new_bus_route` | runs locally (`edits._new_bus`): road-routed between gazetteer stops, stops every 500 m, time = baseline car time x 1.3 + 20 s/stop, 15-min default headway, operating cost |
-| `new_rail_line` | runs locally (`edits.apply_new_line`): corridor geometry if given, else straight line at 18 km/h (streetcar) / 26 (light rail), streetcar capital benchmarks |
+| `new_rail_line` | runs locally (`edits.apply_new_line`): corridor geometry if given, else the shortest street route between stops (`scenario.path_on_streets`: no freeways, local streets count 1.5x) at 18 km/h (streetcar) / 26 (light rail); heavy rail stays a straight line; streetcar capital benchmarks |
 | `change_frequency` | runs locally (`edits.apply_change_frequency`): headway of the named line's GTFS patterns, operating cost |
-| `brt_lane` | runs (`edits.apply_brt_lane`): lane removed on the listed roads (single-lane edges keep 70% capacity), BRT stations every 600 m along the longest chain of those roads, 22 km/h, 10-min default headway, BRT capital benchmarks |
+| `brt_lane` | runs (`edits.apply_brt_lane`): lane removed on the listed roads (single-lane edges keep 70% capacity), BRT stations every 600 m along the longest chain of those roads, 22 km/h, 10-min default headway, BRT capital benchmarks. With no road listed but two or more stops, the lane follows the street route between them (`scenario.path_on_streets`) and is taken from those roads |
 | `close_road` | runs (`edits.apply_close_road`): closed edges cost 1e6 s; background traffic on them is rerouted between each stretch's ends, or dropped when the box has no detour (stated in the result). Commuters whose home or work street is itself closed are counted, kept at their baseline trip and left out of the totals |
 | others | 501 |
 

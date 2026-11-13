@@ -137,6 +137,53 @@ def path_on_road(net, corridor, a, b):
     return path, rows
 
 
+# A line placed with no named corridor follows streets: never a freeway, and a local street
+# counts 1.5x its length so the route keeps to arterials where it can (ASSUMPTION).
+NO_TRANSIT_CLASSES = ("motorway", "motorway_link")
+LOCAL_STREET_CLASSES = ("residential", "unclassified", "living_street")
+LOCAL_STREET_COST = 1.5
+
+
+def path_on_streets(net, a, b):
+    """Shortest street route between two points for a new transit line -> (path, edge_rows).
+    Undirected (the line runs both ways on the same streets); (None, []) when there is none."""
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import dijkstra
+
+    e = net.edges
+    hw = e.highway.values
+    use = np.where(~np.isin(hw, NO_TRANSIT_CLASSES))[0]
+    w = e.length_m.values[use] * np.where(np.isin(hw[use], LOCAL_STREET_CLASSES), LOCAL_STREET_COST, 1.0)
+    u, v = e.u_idx.values[use], e.v_idx.values[use]
+    uu, vv, ww, ii = np.r_[u, v], np.r_[v, u], np.r_[w, w], np.r_[use, use]
+    fwd = np.r_[np.ones(len(use), bool), np.zeros(len(use), bool)]
+    order = np.lexsort((ww, vv, uu))  # cheapest edge per node pair first
+    first = np.r_[True, (uu[order][1:] != uu[order][:-1]) | (vv[order][1:] != vv[order][:-1])]
+    sel = order[first]
+    m = csr_matrix((np.maximum(ww[sel], 1e-6), (uu[sel], vv[sel])), shape=(net.n_nodes, net.n_nodes))
+    ok = np.union1d(u, v)
+    if getattr(net, "in_scc", None) is not None:
+        ok = ok[net.in_scc[ok]]
+    na, nb = (int(ok[np.argmin([_m(net.node_xy[n], p) for n in ok])]) for p in (a, b))
+    _, pred = dijkstra(m, indices=[na], return_predecessors=True)
+    if na == nb or pred[0, nb] < 0:
+        return None, []
+    nodes = [nb]
+    while nodes[-1] != na:
+        nodes.append(int(pred[0, nodes[-1]]))
+    nodes = nodes[::-1]
+    edge_of = {(int(uu[k]), int(vv[k])): (int(ii[k]), bool(fwd[k])) for k in sel}
+    path, rows = [list(a)], []
+    for x, y in zip(nodes[:-1], nodes[1:]):
+        i, forward = edge_of[(x, y)]
+        g = net.edge_geoms[i] if forward else net.edge_geoms[i][::-1]
+        rows.append(i)
+        path += [list(c) for c in g if list(c) != path[-1]]
+    if list(b) != path[-1]:
+        path.append(list(b))
+    return path, rows
+
+
 def build_corridor(net, edit, gz):
     """Ordered hop polylines between consecutive stops + metadata per hop."""
     corridors = edit.get("corridor") or []

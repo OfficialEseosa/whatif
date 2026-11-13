@@ -32,7 +32,7 @@ DEFAULT_HEADWAY_MIN = {"streetcar": 10.0, "light_rail": 10.0, "heavy_rail": 8.0,
 BRT_SPEED_KPH = 22.0           # average incl. dwell in a dedicated lane (not slowed by traffic)
 BRT_STOP_SPACING_M = 600.0     # BRT stations roughly every 600 m along the corridor
 NEW_BUS_SPEED_KPH = 14.0       # new local bus in mixed traffic, incl. dwell (not slowed further by congestion)
-RAIL_STRAIGHT_SPEED_KPH = {"streetcar": 18.0, "light_rail": 26.0, "heavy_rail": 45.0}
+NEW_RAIL_SPEED_KPH = {"streetcar": 18.0, "light_rail": 26.0, "heavy_rail": 45.0}
 SHARED_LANE_CAPACITY_FACTOR = 0.7  # same rule as scenario.py lane removal
 
 
@@ -181,38 +181,111 @@ def _new_line_patterns(route_id, name, mode, headway, stop_ids, ivt, hops):
                     stop_ids=list(stop_ids)[::-1], ivt_s=list(ivt)[::-1], hop_paths=[h[::-1] for h in hops[::-1]])]
 
 
+def _stops_in_box(stops):
+    import config
+
+    w, s_, e_, n_ = config.BBOX
+    for s in stops:
+        x, y = s["coord"]
+        if not (w <= x <= e_ and s_ <= y <= n_):
+            raise EditError(f"{s['name']} is outside the area the simulator covers")
+
+
+def _streets_on(net, rows, limit=4):
+    """Street names along a route in order of travel (the `limit` longest ones)."""
+    e = net.edges
+    km: dict = {}
+    for i in rows:
+        nm = e.name.values[i]
+        if nm:
+            km[nm] = km.get(nm, 0.0) + float(e.length_m.values[i])
+    keep = set(sorted(km, key=km.get, reverse=True)[:limit])
+    return [n for n in km if n in keep]
+
+
+def _street_at(net, rows, q):
+    """Name of the route's street nearest to point q ('' when unnamed)."""
+    i = min(rows, key=lambda r: min(_m(c, q) for c in net.edge_geoms[r]))
+    return net.edges.name.values[i] or ""
+
+
+def _brt_between_stops(net, stops):
+    """No road named: the bus lane follows the street route between the named places.
+    -> (path, edge rows, edge mask in both directions, hops, station points, names, gazetteer ids)."""
+    from scenario import path_on_streets
+
+    _stops_in_box(stops)
+    e = net.edges
+    eu, ev = e.u_idx.values, e.v_idx.values
+    both: dict = {}
+    for i in range(len(e)):
+        both.setdefault((min(eu[i], ev[i]), max(eu[i], ev[i])), []).append(i)
+    mask = np.zeros(len(e), bool)
+    path, rows_all, hops, pts, names, gids = [], [], [], [], [], []
+    for k, (a, b) in enumerate(zip(stops[:-1], stops[1:])):
+        p, rows = path_on_streets(net, tuple(a["coord"]), tuple(b["coord"]))
+        if not p or len(p) < 2:
+            raise EditError(f"brt_lane: no street route between {a['name']} and {b['name']}")
+        for i in rows:
+            mask[both[(min(eu[i], ev[i]), max(eu[i], ev[i]))]] = True
+        rows_all += rows
+        L = _plen(p)
+        sub, cut = _cut(p, list(np.linspace(0, L, max(1, int(round(L / BRT_STOP_SPACING_M))) + 1)))
+        hops += sub
+        path += p if not path else p[1:]
+        for j, q in enumerate(cut if k == len(stops) - 2 else cut[:-1]):
+            named = a if j == 0 else b if j == len(cut) - 1 else None
+            pts.append(list(named["coord"]) if named else q)
+            names.append(named["name"] if named else _street_at(net, rows, q))
+            gids.append(named["gazetteerId"] if named else None)
+    return path, rows_all, mask, hops, pts, names, gids
+
+
 def apply_brt_lane(base, edit):
     net = base.net
+    stops_in = edit.get("stops") or []
     mask = way_mask(net, edit.get("roadIds"))
-    if not mask.any():
-        raise EditError("brt_lane: none of the roadIds are on the simulated road network")
-    path, rows = _corridor_from_ways(net, mask)
-    if not path or _plen(path) < 2 * BRT_STOP_SPACING_M:
-        raise EditError("brt_lane: the listed roads do not form a corridor long enough for BRT stations")
-    L = _plen(path)
-    n = max(2, int(round(L / BRT_STOP_SPACING_M)) + 1)
-    pos = list(np.linspace(0, L, n))
-    hops, stop_xy = _cut(path, pos)
-    road = net.edges.name.values[rows]
-    road_name = pd.Series([r for r in road if r]).mode().iloc[0] if any(road) else "the corridor"
+    if mask.any():
+        path, rows = _corridor_from_ways(net, mask)
+        if not path or _plen(path) < 2 * BRT_STOP_SPACING_M:
+            raise EditError("brt_lane: the listed roads do not form a corridor long enough for BRT stations")
+        L = _plen(path)
+        n = max(2, int(round(L / BRT_STOP_SPACING_M)) + 1)
+        hops, stop_xy = _cut(path, list(np.linspace(0, L, n)))
+        road = net.edges.name.values[rows]
+        road_name = pd.Series([r for r in road if r]).mode().iloc[0] if any(road) else "the corridor"
+        where = f"along {road_name}"
+        names = [f"{road_name} BRT {k+1}" for k in range(n)]
+        gids = [None] * n
+    elif len(stops_in) >= 2:
+        path, rows, mask, hops, stop_xy, names, gids = _brt_between_stops(net, stops_in)
+        L = _plen(path)
+        n = len(stop_xy)
+        names = [nm if g else f"{nm or 'BRT'} BRT {k+1}" for k, (nm, g) in enumerate(zip(names, gids))]
+        via = _streets_on(net, rows)
+        where = (f"from {stops_in[0]['name']} to {stops_in[-1]['name']}" + (f" via {', '.join(via)}" if via else "")
+                 + " (no road named: shortest street route, freeways excluded, arterials preferred)")
+    else:
+        raise EditError("brt_lane: a bus lane needs a road on the simulated network, or two places inside the "
+                        "simulated area to run between")
     headway = float(edit.get("headwayMin") or DEFAULT_HEADWAY_MIN["brt"])
     ivt = [max(30.0, _plen(h) / (BRT_SPEED_KPH / 3.6)) for h in hops]
-    ids = [f"brt_{k}" for k in range(n)]
+    ids = [f"gz_{g}" if g else f"brt_{k}" for k, g in enumerate(gids)]
     td0 = base.run.td
-    stops = pd.concat([td0.stops, pd.DataFrame({"stop_id": ids, "name": [f"{road_name} BRT {k+1}" for k in range(n)],
+    stops = pd.concat([td0.stops, pd.DataFrame({"stop_id": ids, "name": names,
                                                 "lng": [s[0] for s in stop_xy], "lat": [s[1] for s in stop_xy]})],
-                      ignore_index=True)
+                      ignore_index=True).drop_duplicates("stop_id")
     new = _new_line_patterns("proposed_brt", edit.get("name") or "BRT", "brt", headway, ids, ivt, hops)
     td = TransitData(stops=stops, patterns=list(td0.patterns) + new)
     lanes = int(edit.get("lanesRemoved") if edit.get("lanesRemoved") is not None else 1)
     cap = lane_removal(net, base.run.capacity, mask, lanes)
-    notes = [f"BRT along {road_name}: {L/1000:.1f} km, {n} stations every ~{BRT_STOP_SPACING_M:g} m, every {headway:g} min, "
+    notes = [f"BRT {where}: {L/1000:.1f} km, {n} stations every ~{BRT_STOP_SPACING_M:g} m, every {headway:g} min, "
              f"{BRT_SPEED_KPH:g} km/h average in its own lane (not slowed by traffic).",
              f"{lanes} car lane(s) per direction removed on {int(mask.sum())} road edges; single-lane edges keep "
              f"{SHARED_LANE_CAPACITY_FACTOR:.0%} capacity."]
     line = {"path": [[round(x, 5), round(y, 5)] for x, y in path],
-            "stops": [{"gazetteerId": f"sim_brt_{k+1}", "name": f"{road_name} BRT {k+1}",
-                       "coord": [round(s[0], 5), round(s[1], 5)]} for k, s in enumerate(stop_xy)]}
+            "stops": [{"gazetteerId": g or f"sim_brt_{k+1}", "name": names[k],
+                       "coord": [round(s[0], 5), round(s[1], 5)]} for k, (s, g) in enumerate(zip(stop_xy, gids))]}
     return {"td": td, "cap": cap, "closed": None, "extra_od": None, "road_only": False,
             "new_pats": {len(td0.patterns), len(td0.patterns) + 1}, "line": line, "notes": notes,
             "change": {"track": None, "stops": [tuple(s) for s in stop_xy], "cost": costs.capital(L, "brt")}}
@@ -333,13 +406,7 @@ def apply_new_line(base, edit, build_corridor, path_on_road):
         raise EditError(f"A new line needs at least two stops inside the simulated area; got {len(stops)} ({got}). "
                         f"Places outside the core box (Downtown, Midtown, Old Fourth Ward, Eastside) are not "
                         f"simulated yet.")
-    import config
-
-    w, s_, e_, n_ = config.BBOX
-    for s in stops:
-        x, y = s["coord"]
-        if not (w <= x <= e_ and s_ <= y <= n_):
-            raise EditError(f"{s['name']} is outside the area the simulator covers")
+    _stops_in_box(stops)
     is_bus = edit["type"] == "new_bus_route" or (edit.get("tech") in ("bus", "brt"))
     tech = edit.get("tech") or ("bus" if is_bus else "light_rail")
     notes = []
@@ -350,20 +417,24 @@ def apply_new_line(base, edit, build_corridor, path_on_road):
 
         hops, kinds, cn = build_corridor(net, edit, load_gazetteer())
         notes += cn
+    elif tech == "heavy_rail":
+        hops = [[list(a["coord"]), list(b["coord"])] for a, b in zip(stops[:-1], stops[1:])]
+        notes.append("No corridor given: heavy rail is grade-separated, so it is drawn and timed as straight "
+                     "lines between stations (assumption).")
     else:
-        hops, kinds = [], []
+        from scenario import path_on_streets
+
+        hops, rows = [], []
         for a, b in zip(stops[:-1], stops[1:]):
-            if is_bus:
-                p, _ = path_on_road(net, None, tuple(a["coord"]), tuple(b["coord"]))
-                hops.append(p or [a["coord"], b["coord"]]); kinds.append("mixed")
-            else:
-                hops.append([list(a["coord"]), list(b["coord"])]); kinds.append("straight")
-        if not is_bus:
-            notes.append("No corridor given: rail drawn and timed as straight lines between stops (assumption).")
-    if is_bus:
-        speeds = [NEW_BUS_SPEED_KPH] * len(hops)
-    else:
-        speeds = [RAIL_STRAIGHT_SPEED_KPH.get(tech, 26.0)] * len(hops)
+            p, r = path_on_streets(net, tuple(a["coord"]), tuple(b["coord"]))
+            if not p or len(p) < 2:
+                raise EditError(f"no street route between {a['name']} and {b['name']}")
+            hops.append(p); rows += r
+        via = _streets_on(net, rows)
+        notes.append("No corridor given: the line follows the shortest street route between stops"
+                     + (f" (via {', '.join(via)})" if via else "") + "; freeways excluded, arterials preferred "
+                     "(assumption).")
+    speeds = [NEW_RAIL_SPEED_KPH.get(tech, 26.0)] * len(hops)
     ivt = [max(30.0, _plen(h) / (s / 3.6)) for h, s in zip(hops, speeds)]
     headway = float(edit.get("headwayMin") or DEFAULT_HEADWAY_MIN.get(tech, 10.0))
     ids = [f"gz_{s['gazetteerId']}" for s in stops]
