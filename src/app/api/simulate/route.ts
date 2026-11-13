@@ -6,7 +6,10 @@
 //   3. frontend mock public/scenarios/beltline-streetcar.json
 // The result carries `source` ("live_sim" | "prebaked_sim" | "mock") and `mockSections`;
 // the same source is in the `X-Scenario-Source` response header.
+// When the request carries article claims, `claims` is recomputed from the chosen result
+// (compareClaims), so the article check always matches the numbers on screen.
 import { ScenarioResultSchema, SimulateRequestSchema, type ScenarioResult, type ScenarioSource, type SimulateRequest } from "@/lib/contract";
+import { compareClaims } from "@/lib/ai/article/compareClaims";
 import { readBody } from "@/lib/http";
 import { MOCK_SCENARIO_ID, annotate, findPrebakedSim, readMockScenario } from "@/lib/scenarios";
 
@@ -56,5 +59,9 @@ export async function POST(req: Request) {
   const out = annotate(picked.result, picked.source);
   // Article claims are only meaningful when the plan came from an article.
   if (!body.claims?.length) out.claims = [];
+  else {
+    out.claims = compareClaims(body.claims, out);
+    out.mockSections = out.mockSections?.filter((k) => k !== "claims");
+  }
   return Response.json(out, { headers: { "X-Scenario-Source": picked.source } });
 }

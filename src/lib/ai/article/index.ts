@@ -9,5 +9,6 @@
 export { extractClaimsDeterministic, verifyQuotes, assignIds, normaliseWhitespace, MAX_CLAIMS } from "./extractClaims";
 export { METRICS, METRIC_KEYS, isMetricKey, isModeled, resolveMetricPath } from "./metrics";
 export type { MetricKey, MetricDef, MetricKind } from "./metrics";
+export { compareClaims, rateNumeric, TOLERANCE, VC_CHANGE } from "./compareClaims";
 export { parseNumberToken, parseClaimedValue, NUMBER_TOKEN_SOURCE } from "./parseNumber";
 export type { ParsedNumber } from "./parseNumber";

@@ -115,7 +115,8 @@ q { quotes: "\201C" "\201D"; }
 .badge-verify { color: var(--history); margin-left: 6px; }
 .grade-good, .stance-for, .rating-accurate { color: var(--good); }
 .grade-fair, .stance-mixed, .rating-partly { color: var(--fair); }
-.grade-poor, .stance-against, .rating-overstated, .rating-understated, .rating-unsupported { color: var(--poor); }
+.grade-poor, .stance-against, .rating-overstated, .rating-understated { color: var(--poor); }
+.rating-unsupported { color: var(--muted); }
 .tone-gain { color: var(--good); }
 .tone-loss { color: var(--poor); }
 .card { display: grid; gap: 4px; text-align: left; width: 100%; background: var(--surface-raised); border: 1px solid transparent; border-radius: var(--radius-card); padding: 10px 12px; }

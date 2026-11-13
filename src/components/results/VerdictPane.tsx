@@ -5,6 +5,7 @@ import { MockTag } from "../MockTag";
 type MockFn = (key: string) => boolean;
 
 const VERDICT_WORD = { good: "A good plan", mixed: "A mixed plan", poor: "A poor plan" } as const;
+const RATING_WORD = { accurate: "Accurate", overstated: "Overstated", understated: "Understated", partly: "Partly", unsupported: "Can't check" } as const;
 
 export function VerdictPane({
   verdict,
@@ -93,7 +94,7 @@ export function ClaimCheckList({ claims, mock }: { claims: ClaimCheck[]; mock: b
           <li key={c.id} className="claim">
             <div className="row gap-sm">
               <q className="grow">{c.quote}</q>
-              <span className={`badge rating-${c.rating}`}>{c.rating}</span>
+              <span className={`badge rating-${c.rating}`}>{RATING_WORD[c.rating]}</span>
             </div>
             <dl className="claim-pair">
               <div>
