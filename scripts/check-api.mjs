@@ -9,7 +9,8 @@ const base = process.argv[2] || "http://localhost:3000";
 
 async function post(route, body) {
   const res = await fetch(base + route, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const json = await res.json();
+  // /api/simulate sends a large live result gzipped as opaque bytes with X-Body-Encoding: gzip.
+  const json = res.headers.get("x-body-encoding") === "gzip" ? await new Response(res.body.pipeThrough(new DecompressionStream("gzip"))).json() : await res.json();
   if (!res.ok) throw new Error(`${route} ${res.status}: ${JSON.stringify(json).slice(0, 400)}`);
   return json;
 }

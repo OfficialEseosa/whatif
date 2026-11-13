@@ -62,7 +62,11 @@ async function simulate(
 ): Promise<{ result: ScenarioResult | null; source: ScenarioSource; timing: SimulateTiming; notSimulated?: NotSimulated }> {
   const t0 = performance.now();
   const res = await fetch("/api/simulate", post(req));
-  const json = await res.json().catch(() => null);
+  // A large live result arrives gzipped as opaque bytes (see the route's json()).
+  const json = await (res.headers.get("x-body-encoding") === "gzip" && res.body
+    ? new Response(res.body.pipeThrough(new DecompressionStream("gzip"))).json()
+    : res.json()
+  ).catch(() => null);
   const routeMs = performance.now() - t0;
   if (!res.ok) throw new Error(json?.error ? `/api/simulate: ${json.error}` : `/api/simulate: HTTP ${res.status}`);
   if (json && typeof json === "object" && "scenarioUrl" in json) {

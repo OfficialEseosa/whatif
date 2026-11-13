@@ -88,11 +88,15 @@ async function fromLiveSim(body: SimulateRequest): Promise<Live | null> {
   return { kind: "ok", result: parsed.data, source };
 }
 
-/** JSON response, gzipped when large so a full live result fits under the platform's response cap. */
+/**
+ * JSON response. A large body (a full live result) is sent gzipped as opaque bytes with
+ * `X-Body-Encoding: gzip` (src/lib/api.ts unpacks it): Vercel caps function responses at 4.5 MB, and
+ * a real Content-Encoding header would be compressed again by the framework.
+ */
 function json(data: unknown, headers: Record<string, string>): Response {
   const text = JSON.stringify(data);
   if (text.length <= GZIP_OVER_BYTES) return Response.json(data, { headers });
-  return new Response(new Uint8Array(gzipSync(text)), { headers: { ...headers, "Content-Type": "application/json", "Content-Encoding": "gzip" } });
+  return new Response(new Uint8Array(gzipSync(text)), { headers: { ...headers, "Content-Type": "application/octet-stream", "X-Body-Encoding": "gzip" } });
 }
 
 export async function POST(req: Request) {
