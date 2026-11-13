@@ -1,0 +1,10 @@
+# Request-time dependencies of the /simulate service (no OSMnx / geopandas / network access).
+# Build-time (fetching data, building caches) needs requirements.txt.
+fastapi==0.162.6
+uvicorn[standard]==0.54.0
+networkx==3.7
+scipy==1.18.1
+numpy==2.5.4
+pandas==3.1.1
+pydantic==2.14.3
+shapely==2.2.0

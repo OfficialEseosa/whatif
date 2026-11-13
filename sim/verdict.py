@@ -33,6 +33,9 @@ RENTERS_GOOD_MAX = 250.0
 RENTERS_FAIR_MAX = 1000.0
 # who-pays: a road counts as "slowed" if per-traversal delay grows at least this much,
 # and as "spillover" (not an edited road) if peak v/c grows at least this much.
+# The contract has no "n/a" grade; tests that do not apply to an edit type (cost per rider of a
+# road closure) get this grade, value 0 and a sublabel starting "Not applicable".
+NA_GRADE = "fair"
 SLOWED_ROAD_MIN = 0.05
 SPILLOVER_VC_DELTA = 0.05
 
@@ -64,13 +67,23 @@ def _line_len_m(path):
     return float(np.hypot(np.diff(p[:, 0]) * lat0, np.diff(p[:, 1])).sum() * 111_320)
 
 
-def assess(base, prun, edit, line, riders_on_line, metrics_b, metrics_p, roads):
+def default_change(edit, line):
+    """Change spec for edits that did not pass one (extend_line): new track = the line path,
+    new stops = gazetteer stops that are not existing stations, streetcar capital benchmarks."""
+    L = _line_len_m(line.get("path") or [])
+    return {"track": line.get("path") or None,
+            "stops": [tuple(s["coord"]) for s in new_stops(edit)],
+            "cost": costs.capital(L, "streetcar") if L > 0 else costs.not_applicable("no new track")}
+
+
+def assess(base, prun, edit, line, riders_on_line, metrics_b, metrics_p, roads, change=None):
     """Returns dict with verdict, whoPays items, tracts, ctx (for agent fields), notes."""
     from shapely.geometry import LineString, MultiPoint
 
     dem, brun = base.dem, base.run
     prun = prun or brun
     is_base = prun is brun
+    change = change or default_change(edit, line)
     eq = eqm.load_equity()
     tr = eq.tracts.set_index("GEOID")
     od = dem.od
@@ -79,13 +92,18 @@ def assess(base, prun, edit, line, riders_on_line, metrics_b, metrics_p, roads):
     hours = float((saved * jobs).sum() / 60.0)
     new_r = metrics_p["dailyTransitRiders"] - metrics_b["dailyTransitRiders"]
 
-    # cost
-    L = _line_len_m(line.get("path") or [])
-    est = costs.estimate(L) if L > 0 else None
-    cost_mid = est["mid"] if est else 0.0
-    cpt = costs.cost_per_new_trip(cost_mid, new_r) if est else 0.0
-    hh_yr = {k: costs.annual(est[k]) / eq.cost_households for k in ("low", "mid", "high")} if est else \
-        {"low": 0.0, "mid": 0.0, "high": 0.0}
+    # cost: capital (per-mile benchmarks), operating (vehicle-hours x cost/hour) or not applicable
+    C = change["cost"]
+    est = C if C["kind"] == "capital" else None
+    if C["kind"] == "capital":
+        cpt = costs.cost_per_new_trip(C["mid"], new_r)
+        hh_yr = {k: costs.annual(C[k]) / eq.cost_households for k in ("low", "mid", "high")}
+    elif C["kind"] == "operating":
+        cpt = costs.op_cost_per_new_trip(C["mid"], new_r)
+        hh_yr = {k: C[k] / eq.cost_households for k in ("low", "mid", "high")}
+    else:
+        cpt = None
+        hh_yr = {"low": 0.0, "mid": 0.0, "high": 0.0}
 
     # redlined share of gains
     red = tr.redlined.reindex(od.home_tract.values).fillna(False).values
@@ -94,11 +112,11 @@ def assess(base, prun, edit, line, riders_on_line, metrics_b, metrics_p, roads):
     pop_red = float(jobs[red].sum() / jobs.sum())
 
     # rent pressure / noise around NEW stops and track
-    ns = new_stops(edit)
-    stops_geom = MultiPoint([tuple(s["coord"]) for s in ns]) if ns else None
-    track = LineString(line["path"]) if line.get("path") and len(line["path"]) >= 2 else None
+    ns = change["stops"]
+    stops_geom = MultiPoint(ns) if ns else None
+    track = LineString(change["track"]) if change.get("track") and len(change["track"]) >= 2 else None
     w, s, e, n = config.BBOX
-    inbox = eq.tracts.cx[w:e, s:n].copy()
+    inbox = eqm.in_bbox(eq.tracts, config.BBOX)
     inbox["near_share"] = eqm.buffer_share(inbox, stops_geom, eqm.RENT_PRESSURE_RADIUS_M)
     inbox["noise_share"] = eqm.buffer_share(inbox, track, eqm.NOISE_BUFFER_M)
     pz = inbox.pressure_tract.values & (inbox.near_share.values > 0)
@@ -121,7 +139,16 @@ def assess(base, prun, edit, line, riders_on_line, metrics_b, metrics_p, roads):
     else:
         g_time = "poor" if hours < TIME_SAVED_FAIR_HRS else _grade_hi(hours, TIME_SAVED_GOOD_HRS, TIME_SAVED_FAIR_HRS)
         g_new = _grade_hi(new_r, NEW_RIDERS_GOOD, NEW_RIDERS_FAIR)
-        g_cost = _grade_lo(cpt, COST_PER_TRIP_GOOD, COST_PER_TRIP_FAIR) if est else "fair"
+        if cpt is None:                       # not applicable (e.g. a road closure)
+            g_cost, cpt_val = NA_GRADE, 0.0
+            cpt_sub = f"Not applicable: {C['why']}"
+        elif not np.isfinite(cpt):            # cost but no new riders
+            g_cost, cpt_val = "poor", 0.0
+            cpt_sub = f"{C['label']}; no new transit riders, so cost per new-rider trip is unbounded"
+        else:
+            g_cost, cpt_val = _grade_lo(cpt, COST_PER_TRIP_GOOD, COST_PER_TRIP_FAIR), round(cpt, 2)
+            cpt_sub = (f"{C['label']} / new-rider trips; FTA-style breakpoints (good < ${COST_PER_TRIP_GOOD:g}, "
+                       f"poor >= ${COST_PER_TRIP_FAIR:g})")
         g_red = ("poor" if gain.sum() <= 0 else
                  _grade_hi(red_share, pop_red, REDLINED_FAIR_RATIO * pop_red))
         g_rent = _grade_lo(renters_pz, RENTERS_GOOD_MAX + 1e-9, RENTERS_FAIR_MAX + 1e-9)
@@ -134,11 +161,8 @@ def assess(base, prun, edit, line, riders_on_line, metrics_b, metrics_p, roads):
              "sublabel": f"Commuters/day switching to transit; work trips only (good >= {NEW_RIDERS_GOOD:,.0f}, "
                          f"fair >= {NEW_RIDERS_FAIR:,.0f})",
              "value": round(new_r, 1), "unit": "riders/day", "grade": g_new},
-            {"key": "cost_per_rider", "label": "Cost per new-rider trip",
-             "sublabel": (f"Estimated capital ${cost_mid/1e6:,.0f}M (range ${est['low']/1e6:,.0f}-{est['high']/1e6:,.0f}M) "
-                          f"over {costs.ANNUALIZE_YEARS} yrs / new-rider trips; FTA-style breakpoints "
-                          f"(good < ${COST_PER_TRIP_GOOD:g}, poor >= ${COST_PER_TRIP_FAIR:g})") if est else "No new track",
-             "value": round(cpt, 2) if np.isfinite(cpt) else 1e9, "unit": "usd/trip", "grade": g_cost},
+            {"key": "cost_per_rider", "label": "Cost per new-rider trip", "sublabel": cpt_sub,
+             "value": cpt_val, "unit": "usd/trip", "grade": g_cost},
             {"key": "redlined_benefit_share", "label": "Benefit to formerly redlined tracts",
              "sublabel": (f"Share of time gains to residents of HOLC-D tracts (>= {eqm.REDLINED_D_SHARE:.0%} of area "
                           f"graded D in 1938); they are {pop_red:.1%} of modeled commuters"),
@@ -155,7 +179,8 @@ def assess(base, prun, edit, line, riders_on_line, metrics_b, metrics_p, roads):
         n_poor = sum(g == "poor" for g in grades.values())
         # RULE: poor if time is a net loss or both ridership and cost-effectiveness are poor;
         # good if >= 3 tests good and none poor; otherwise mixed.
-        if grades["time_saved"] == "poor" or (grades["new_riders"] == "poor" and grades["cost_per_rider"] == "poor"):
+        if grades["time_saved"] == "poor" or (grades["new_riders"] == "poor" and grades["cost_per_rider"] == "poor"
+                                              and cpt is not None):
             label = "poor"
         elif n_good >= 3 and n_poor == 0:
             label = "good"
@@ -168,10 +193,16 @@ def assess(base, prun, edit, line, riders_on_line, metrics_b, metrics_p, roads):
         else:
             hl = f"{hours:,.0f} commuter-hours saved per weekday"
         headline = f"{hl}; {max(new_r, 0):,.0f} new transit riders"
-        cost_txt = (f"Estimated capital cost ${est['low']/1e6:,.0f}-{est['high']/1e6:,.0f}M for "
-                    f"{est['miles']:.1f} mi (per-mile benchmarks of 3 US streetcars), i.e. "
-                    f"${cpt:,.0f} per new-rider trip over {costs.ANNUALIZE_YEARS} years at the midpoint and "
-                    f"${hh_yr['low']:.2f}-{hh_yr['high']:.2f} per Fulton+DeKalb household per year. ") if est else ""
+        if cpt is None:
+            cost_txt = f"No cost estimate ({C['why']}). "
+        else:
+            cost_txt = (f"{C['label']}"
+                        + (f", i.e. ${cpt:,.0f} per new-rider trip at the midpoint" if np.isfinite(cpt) else
+                           ", with no new riders to spread it over")
+                        + f", or ${hh_yr['low']:.2f}-{hh_yr['high']:.2f} per Fulton+DeKalb household per year. ")
+        cut = int(prun.asg.cut_off.sum()) if getattr(prun.asg, "cut_off", None) is not None else 0
+        if cut:
+            cost_txt += f"{jobs[prun.asg.cut_off].sum():,.0f} commuters have no drive route left. "
         summary = (
             f"The model measured work commutes only ({metrics_b['populationModeled']:,} people who work in the study "
             f"box; no school, errand or off-peak trips). Total commute time {'falls' if hours > 0 else 'rises'} by "
@@ -234,14 +265,12 @@ def assess(base, prun, edit, line, riders_on_line, metrics_b, metrics_p, roads):
                                  f"medians across tracts). Exposure, not a displacement forecast."
                                  if len(pzt) else "No rent-pressure tract within the zone around new stops."),
                       "zone": "rent_pressure"})
-        if est:
+        if C["kind"] in ("capital", "operating"):
             items.append({"key": "regional_cost", "label": "Cost per household", "value": round(hh_yr["mid"], 2),
                           "unit": "usd/yr",
-                          "detail": (f"ESTIMATE: capital ${est['low']/1e6:,.0f}-{est['high']/1e6:,.0f}M "
-                                     f"(${est['per_mile'][0]/1e6:.0f}-{est['per_mile'][-1]/1e6:.0f}M/mi) spread over "
-                                     f"{costs.ANNUALIZE_YEARS} yrs and {eq.cost_households:,} Fulton+DeKalb households "
-                                     f"(ACS {eq.acs_year}) = ${hh_yr['low']:.2f}-{hh_yr['high']:.2f}/yr. Operating cost not "
-                                     f"included. Benchmarks: " + " | ".join(est["sources"])),
+                          "detail": (f"ESTIMATE: {C['label']}, spread over {eq.cost_households:,} Fulton+DeKalb "
+                                     f"households (ACS {eq.acs_year}) = ${hh_yr['low']:.2f}-{hh_yr['high']:.2f}/yr. "
+                                     f"{C['note']} Sources: " + " | ".join(C["sources"])),
                           "zone": "regional_cost"})
 
     # ---- tracts (in-box, real polygons)
@@ -266,12 +295,12 @@ def assess(base, prun, edit, line, riders_on_line, metrics_b, metrics_p, roads):
         tracts.append(t)
 
     ctx = {"renter_share": tr.renter_share, "pressure": tr.pressure_tract, "county": tr.COUNTYFP,
-           "stops": [tuple(s["coord"]) for s in ns], "hh_cost_mid": hh_yr["mid"]}
+           "stops": [tuple(s) for s in ns], "hh_cost_mid": hh_yr["mid"]}
     notes = [f"Equity inputs: ACS {eq.acs_year} 5-year (B25003, B19013, B25064, B25070), Census 2023 tract boundaries, "
              f"HOLC 1938 Atlanta (Mapping Inequality, Univ. of Richmond). Agent 'renter' is SAMPLED from the home "
              f"tract's renter share (seeded), not observed. displacementRisk is not modeled ('none')."]
-    if est:
-        notes.append("Capital cost is an ESTIMATE from per-mile benchmarks: " + " | ".join(est["sources"]))
+    if C["kind"] in ("capital", "operating"):
+        notes.append(f"Cost is an ESTIMATE ({C['label']}): " + " | ".join(C["sources"]))
     return {"tests": tests, "label": label, "headline": headline, "summary": summary, "items": items,
             "tracts": tracts, "ctx": ctx, "notes": notes, "cost": est, "hh_yr": hh_yr}
 
@@ -288,4 +317,7 @@ def agent_equity(ctx, tract_id, home, rng):
     pressure = bool(renter and near and bool(ctx["pressure"].get(tract_id, False)))
     in_cost = ctx["county"].get(tract_id) in ("121", "089")
     return renter, pressure, round(float(ctx["hh_cost_mid"]) if in_cost else 0.0, 2)
+
+
+
 

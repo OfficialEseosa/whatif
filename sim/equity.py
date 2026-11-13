@@ -1,4 +1,4 @@
-"""Tract-level equity inputs from public data (no API keys).
+﻿"""Tract-level equity inputs from public data (no API keys).
 
   - Tract polygons: Census cartographic boundary file, GA, 2023, 1:500k.
   - ACS 2024 5-year (table-based summary files): B25003 tenure, B19013 median household
@@ -90,7 +90,10 @@ def build_equity() -> Equity:
     ch = {}
     for fips, name in COST_COUNTIES.items():
         ch[name] = int(num(ten.B25003_E001.get("0500000US" + fips)))
-    return Equity(tracts=tr, msa_median_income=msa, cost_households=sum(ch.values()),
+    # Runtime needs no geopandas: keep a plain DataFrame with shapely geometries (WGS84).
+    plain = pd.DataFrame(tr.drop(columns="geometry"))
+    plain["geometry"] = list(tr.geometry.values)
+    return Equity(tracts=plain, msa_median_income=msa, cost_households=sum(ch.values()),
                   county_households=ch, acs_year=config.ACS_YEAR)
 
 
@@ -105,23 +108,46 @@ def load_equity(rebuild=False) -> Equity:
     return eq
 
 
-def buffer_share(tracts, geom_wgs84, radius_m: float) -> np.ndarray:
-    """Share of each tract's area within radius_m of a WGS84 geometry (uniform-density proxy)."""
-    import geopandas as gpd
+_LAT0 = np.cos(np.deg2rad(33.765))
+_K = 111_320.0
 
+
+def _to_m(g):
+    from shapely import transform
+
+    return transform(g, lambda a: np.c_[a[:, 0] * _LAT0 * _K, a[:, 1] * _K])
+
+
+def _to_ll(g):
+    from shapely import transform
+
+    return transform(g, lambda a: np.c_[a[:, 0] / (_LAT0 * _K), a[:, 1] / _K])
+
+
+def in_bbox(tracts, bbox):
+    """Tracts whose polygon intersects bbox (plain shapely; no geopandas at runtime)."""
+    from shapely.geometry import box
+
+    b = box(*bbox)
+    return tracts[[g.intersects(b) for g in tracts.geometry]].copy()
+
+
+def buffer_share(tracts, geom_wgs84, radius_m: float) -> np.ndarray:
+    """Share of each tract's area within radius_m of a WGS84 geometry (uniform-density proxy;
+    local equirectangular metres)."""
     if geom_wgs84 is None or geom_wgs84.is_empty:
         return np.zeros(len(tracts))
-    g = gpd.GeoSeries([geom_wgs84], crs=4326).to_crs(PROJ_CRS).buffer(radius_m).iloc[0]
-    trp = tracts.to_crs(PROJ_CRS)
-    area = trp.geometry.area.values
-    return np.where(area > 0, trp.geometry.intersection(g).area.values / area, 0.0)
+    g = _to_m(geom_wgs84).buffer(radius_m)
+    out = []
+    for t in tracts.geometry:
+        tm = _to_m(t)
+        out.append(tm.intersection(g).area / tm.area if tm.area > 0 else 0.0)
+    return np.asarray(out)
 
 
 def tract_ring(geom, tol_m=TRACT_SIMPLIFY_M) -> list:
     """Exterior ring of the largest part, simplified, as [[lng,lat],...]."""
-    import geopandas as gpd
-
-    g = gpd.GeoSeries([geom], crs=4326).to_crs(PROJ_CRS).simplify(tol_m).to_crs(4326).iloc[0]
+    g = _to_ll(_to_m(geom).simplify(tol_m))
     if g.geom_type == "MultiPolygon":
         g = max(g.geoms, key=lambda p: p.area)
     return [[round(x, 5), round(y, 5)] for x, y in g.exterior.coords]
@@ -133,9 +159,10 @@ if __name__ == "__main__":
     eq = _self.load_equity(rebuild=True)
     t = eq.tracts
     w, s, e, n = config.BBOX
-    inb = t.cx[w:e, s:n]
+    inb = in_bbox(t, config.BBOX)
     print(f"ACS {eq.acs_year}: {len(t)} GA tracts; MSA median HH income ${eq.msa_median_income:,.0f}; "
           f"Fulton+DeKalb households {eq.cost_households:,} {eq.county_households}")
     print(f"in-box tracts {len(inb)}: redlined {int(inb.redlined.sum())}, pressure {int(inb.pressure_tract.sum())}, "
           f"renter share (hh-weighted) {inb.renters.sum() / inb.households.sum():.2f}")
     print(f"GA tracts redlined: {int(t.redlined.sum())}; with any HOLC grade: {int((t.holc_graded_share > 0).sum())}")
+

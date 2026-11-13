@@ -58,6 +58,7 @@ MAJOR_CLASSES = {"motorway", "trunk", "primary", "secondary",
                  "motorway_link", "trunk_link"}
 
 NETWORK_CACHE = config.CACHE_DIR / f"network_{config.bbox_tag()}.pkl"
+DISPLAY_CACHE = config.CACHE_DIR / f"network_display_{config.bbox_tag()}.pkl"
 
 
 def _first(v):
@@ -122,12 +123,25 @@ class Network:
         return {(int(e["u_idx"].values[i]), int(e["v_idx"].values[i])): int(i) for i in chosen}
 
 
-def build_network() -> Network:
+# ASSUMPTION (scale): on the large study box the ASSIGNMENT network keeps only
+# tertiary-and-above roads (+ links); local residential streets are dropped, as in most
+# regional models. Zone connectors already attach to tertiary+ nodes. The DISPLAY
+# network (walk legs, home/work connectors, path checks) keeps every drivable street.
+ASSIGN_CLASSES = {"motorway", "trunk", "primary", "secondary", "tertiary", "motorway_link", "trunk_link",
+                  "primary_link", "secondary_link", "tertiary_link"}
+
+
+def build_network(kind: str = "assign") -> Network:
     import osmnx as ox
 
     if not config.GRAPH_FILE.exists():
         raise FileNotFoundError(f"{config.GRAPH_FILE} missing - run fetch_data.py first")
     G = ox.load_graphml(config.GRAPH_FILE)
+    if kind == "assign" and config.ASSIGN_MAJOR_ROADS_ONLY:
+        drop = [(u, v, k) for u, v, k, d in G.edges(keys=True, data=True)
+                if str(_first(d.get("highway", ""))) not in ASSIGN_CLASSES]
+        G.remove_edges_from(drop)
+        G.remove_nodes_from([n for n in list(G.nodes) if G.degree(n) == 0])
     # Keep the largest WEAKLY connected component: dangling inbound roads cut by the
     # bbox (in-degree 0) are kept as gateway sources. Zones snap only to SCC nodes,
     # so every zone-to-zone OD stays routable.
@@ -181,7 +195,7 @@ def build_network() -> Network:
     in_scc = np.array([int(n) in scc for n in node_osm])
     net = Network(node_osm=node_osm, node_xy=node_xy, edges=edges, edge_geoms=geoms,
                   node_index=node_index, in_scc=in_scc)
-    net.gateways = find_gateways(net, G)
+    net.gateways = find_gateways(net, G) if kind == "assign" else None
     return net
 
 
@@ -248,6 +262,20 @@ def find_gateways(net: "Network", G) -> pd.DataFrame:
                           "cls": hw, "name": str(name)} for nd, hw, name in keep])
 
 
+def load_display_network(rebuild: bool = False) -> Network:
+    """Every drivable street (used for drawing walk/connector legs and path checks)."""
+    if not config.ASSIGN_MAJOR_ROADS_ONLY:
+        return load_network(rebuild)
+    if DISPLAY_CACHE.exists() and not rebuild:
+        with open(DISPLAY_CACHE, "rb") as f:
+            return pickle.load(f)
+    net = build_network("display")
+    with open(DISPLAY_CACHE, "wb") as f:
+        pickle.dump(net, f)
+    print(f"display network: {net.n_nodes} nodes, {len(net.edges)} edges")
+    return net
+
+
 def load_network(rebuild: bool = False) -> Network:
     if NETWORK_CACHE.exists() and not rebuild:
         with open(NETWORK_CACHE, "rb") as f:
@@ -300,6 +328,7 @@ if __name__ == "__main__":
     print(e.groupby("highway").agg(n=("edge_id", "size"), km=("length_m", lambda s: s.sum() / 1000))
           .sort_values("km", ascending=False).round(1).to_string())
     export_major_roads(net)
+
 
 
 

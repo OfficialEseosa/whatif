@@ -154,6 +154,10 @@ def build_demand(net) -> Demand:
                         "hlng": (tc.wx / tc.S000).reindex(ea.home_tract).values,
                         "hlat": (tc.wy / tc.S000).reindex(ea.home_tract).values})
     pairs = pd.concat([pairs, ext], ignore_index=True)
+    if config.ASSIGN_MAJOR_ROADS_ONLY:   # large box only (core box: keeps live runs fast)
+        pairs = split_destinations(net, zones, blk, pairs)
+    else:
+        pairs["d_node"] = zones.node_idx.values[pairs.d.values]
     pairs["peak_trips"] = pairs.jobs * PEAK_HOUR_SHARE
     n_int = int(pairs.jobs[~pairs.ext].sum())
     n_ext = int(pairs.jobs[pairs.ext].sum())
@@ -170,6 +174,45 @@ def build_demand(net) -> Demand:
 # streets), so a big job zone does not load thousands of cars onto one side street.
 CONNECTOR_CLASSES = {"tertiary", "secondary", "primary", "trunk", "tertiary_link", "secondary_link",
                      "primary_link"}
+
+
+# ASSUMPTION: big job zones (Emory, the airport, Downtown) get several road connectors
+# instead of one, so their arrivals are not all forced through a single node. Each
+# destination block group with more than SPLIT_DEST_MIN_JOBS work activity is split over
+# up to SPLIT_DEST_MAX_CONNECTORS connector nodes (its work blocks snapped to the nearest
+# tertiary+ node), in proportion to the blocks' LODES job counts.
+SPLIT_DEST_MIN_JOBS = 1500
+SPLIT_DEST_MAX_CONNECTORS = 6
+
+
+def split_destinations(net, zones, blk, pairs):
+    zones["d_nodes"] = [[int(n)] for n in zones.node_idx]
+    zones["d_w"] = [[1.0] for _ in range(len(zones))]
+    big = zones.index[zones.activity >= SPLIT_DEST_MIN_JOBS]
+    wb = blk[blk.work_wt > 0]
+    nodes = snap(net, wb.blklondd.values, wb.blklatdd.values, connector_only=True)
+    wb = wb.assign(node=nodes)
+    for zi in big:
+        g = wb[wb.bg == zones.bg[zi]].groupby("node").work_wt.sum().sort_values(ascending=False)
+        g = g.head(SPLIT_DEST_MAX_CONNECTORS)
+        if len(g) > 1:
+            zones.at[zi, "d_nodes"] = [int(x) for x in g.index]
+            zones.at[zi, "d_w"] = list((g / g.sum()).values)
+    rows = []
+    multi = zones.d_nodes.map(len).values > 1
+    keep = pairs[~multi[pairs.d.values]].assign(d_node=lambda p: zones.node_idx.values[p.d.values])
+    sp = pairs[multi[pairs.d.values]]
+    for zi, g in sp.groupby("d"):
+        for nd, w in zip(zones.d_nodes[zi], zones.d_w[zi]):
+            rows.append(g.assign(d_node=nd, jobs=g.jobs * w, se_low=g.se_low * w, se_mid=g.se_mid * w,
+                                 se_high=g.se_high * w))
+    out = pd.concat([keep] + rows, ignore_index=True)
+    # internal pairs whose split destination node equals the origin node have no road path
+    same = (~out.ext.values) & (zones.node_idx.values[np.maximum(out.o.values, 0)] == out.d_node.values)
+    out = out[~same].reset_index(drop=True)
+    print(f"  split {len(big)} big destination zones over up to {SPLIT_DEST_MAX_CONNECTORS} connectors "
+          f"({len(pairs):,} -> {len(out):,} OD rows; {pairs.jobs.sum() - out.jobs.sum():,.0f} jobs dropped as same-node)")
+    return out
 
 
 def snap(net, lng, lat, connector_only: bool = False) -> np.ndarray:
@@ -227,6 +270,8 @@ if __name__ == "__main__":
         d = _self.load_demand(load_network(), rebuild=True)
         print(d.zones.head())
         print(f"total in-box jobs {d.total_jobs_in_box:,}; tracts {d.zones.tract.nunique()}")
+
+
 
 
 

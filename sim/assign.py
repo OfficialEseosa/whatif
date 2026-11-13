@@ -124,6 +124,7 @@ class Assignment:
     seconds: float
     out_min: np.ndarray | None = None   # estimated out-of-box minutes (0 for internal)
     gateway: np.ndarray | None = None   # chosen gateway index per OD unit (-1 internal)
+    cut_off: np.ndarray | None = None   # OD units whose only drive route uses a closed road
 
     @property
     def vc(self) -> np.ndarray:
@@ -165,25 +166,48 @@ def gateway_cost_s(net, hlng, hlat) -> np.ndarray:
     dx = (np.asarray(hlng)[:, None] - gw.lng.values[None, :]) * lat0 * 111_320
     dy = (np.asarray(hlat)[:, None] - gw.lat.values[None, :]) * 111_320
     spd = gw.cls.map(OUT_OF_BOX_SPEED_KPH).fillna(30).values / 3.6
-    return np.hypot(dx, dy) * OUT_OF_BOX_DETOUR / spd[None, :]
+    return (np.hypot(dx, dy) * OUT_OF_BOX_DETOUR / spd[None, :]).astype(np.float32)
+
+
+# A closed edge costs this many seconds to traverse (effectively removed; a route that
+# still needs it is "cut off" and reported).
+CLOSED_COST_S = 1.0e6
 
 
 def assign(net, dem, drive_persons: np.ndarray, capacity: np.ndarray | None = None,
-           iterations: int = MSA_ITERATIONS, verbose: bool = True) -> Assignment:
-    """drive_persons: peak-hour persons driving, per OD unit (internal + inbound)."""
+           iterations: int = MSA_ITERATIONS, verbose: bool = True, closed: np.ndarray | None = None,
+           extra_od: tuple | None = None, y0: np.ndarray | None = None, k0: int = 0) -> Assignment:
+    """drive_persons: peak-hour persons driving, per OD unit (internal + inbound).
+    closed: bool per edge (road closures). extra_od: (origin nodes, dest nodes, vehicles/h)
+    routed like commuters but not reported as commuters (displaced background traffic)."""
     t = time.time()
     zones, od = dem.zones, dem.od
     e = net.edges
     t0 = e["t0_s"].values
     cap = e["capacity_vph"].values if capacity is None else capacity
     bg = background_volume(net)
+    if closed is not None and closed.any():
+        bg = bg.copy()
+        bg[closed] = 0.0
+    if extra_od is not None:
+        xo, xd, xv = (np.asarray(extra_od[0], dtype=np.int64), np.asarray(extra_od[1], dtype=np.int64),
+                      np.asarray(extra_od[2], dtype=float))
+    else:
+        xo, xd, xv = np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0)
+
+    def costf(vol):
+        c = bpr(t0, vol, cap)
+        if closed is not None:
+            c[closed] = CLOSED_COST_S
+        return c
     ext = od.ext.values
-    d_nodes = zones.node_idx.values[od.d.values]
+    d_nodes = od.d_node.values if "d_node" in od else zones.node_idx.values[od.d.values]
     gw_nodes = net.gateways.node_idx.values
     int_o = zones.node_idx.values[od.o.values[~ext]]
-    uniq = np.unique(np.r_[int_o, gw_nodes])
+    uniq = np.unique(np.r_[int_o, gw_nodes, xo])
     row = np.zeros(len(od), dtype=np.int64)
     row[~ext] = np.searchsorted(uniq, int_o)
+    xrow = np.searchsorted(uniq, xo)
     gw_rows = np.searchsorted(uniq, gw_nodes)
     gw_cost = gateway_cost_s(net, od.hlng.values[ext], od.hlat.values[ext])  # (Pext, G)
     d_ext = d_nodes[ext]
@@ -192,29 +216,32 @@ def assign(net, dem, drive_persons: np.ndarray, capacity: np.ndarray | None = No
     gw_edges = gateway_out_edges(net)
 
     def choose(sp, vol):
-        tot = gw_cost + approach_delay_s(vol, cap, gw_edges)[None, :] + sp.dist[gw_rows][:, d_ext].T  # (Pext, G)
+        tot = gw_cost + approach_delay_s(vol, cap, gw_edges).astype(np.float32)[None, :]
+        tot += sp.dist[gw_rows][:, d_ext].T.astype(np.float32)   # (Pext, G)
         g = np.argmin(tot, axis=1)
         return g, tot[np.arange(len(g)), g]
 
     y = np.zeros(len(e))
     gap = float("nan")
+    if y0 is not None:      # warm start: continue the baseline's MSA from its final flows
+        y = y0.copy()
     for k in range(iterations):
-        cost = bpr(t0, bg + y, cap)
+        cost = costf(bg + y)
         sp = shortest_paths(net, cost, uniq)
         g, _ = choose(sp, bg + y)
         row[ext] = gw_rows[g]
-        aux = load_flows(net, sp, row, d_nodes, veh)
-        if k == 0:
+        aux = load_flows(net, sp, np.r_[row, xrow], np.r_[d_nodes, xd], np.r_[veh, xv])
+        if k == 0 and y0 is None:
             y = aux
         else:
             tstt = float(((bg + y) * cost).sum())
             sptt = float(((bg + aux) * cost).sum())
             gap = (tstt - sptt) / tstt if tstt > 0 else 0.0
-            y = y + (aux - y) / (k + 1)
+            y = y + (aux - y) / (k0 + k + 1)
         if verbose:
             print(f"  MSA iter {k+1}/{iterations}: max v/c {((bg + y) / cap).max():.2f}"
                   + (f", rel gap {gap:.4f}" if k else ""))
-    cost = bpr(t0, bg + y, cap)
+    cost = costf(bg + y)
     sp = shortest_paths(net, cost, uniq)
     g, tot = choose(sp, bg + y)
     row[ext] = gw_rows[g]
@@ -224,6 +251,7 @@ def assign(net, dem, drive_persons: np.ndarray, capacity: np.ndarray | None = No
     out_min[ext] = (gw_cost[np.arange(len(g)), g] + approach_delay_s(bg + y, cap, gw_edges)[g]) / 60.0
     gateway = np.full(len(od), -1)
     gateway[ext] = g
+    cut_off = drive_s >= CLOSED_COST_S
     drive_min = drive_s / 60.0 + DRIVE_TERMINAL_MIN
     secs = time.time() - t
     if verbose:
@@ -231,7 +259,10 @@ def assign(net, dem, drive_persons: np.ndarray, capacity: np.ndarray | None = No
               f"({veh[ext].sum():,.0f} inbound via {len(gw_nodes)} gateways), {secs:.1f}s")
     return Assignment(volume=bg + y, commuter_volume=y, background=bg, capacity=cap, time_s=cost,
                       sp=sp, od_row=row, od_dest=d_nodes, drive_min=drive_min, rel_gap=gap, seconds=secs,
-                      out_min=out_min, gateway=gateway)
+                      out_min=out_min, gateway=gateway, cut_off=cut_off)
+
+
+
 
 
 

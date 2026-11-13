@@ -42,6 +42,8 @@ def _norm(v):
 
 def edit_key(edit: dict) -> str:
     e = {k: v for k, v in edit.items() if k not in ("assumptions", "name") and v is not None}
+    if e.get("roadIds"):  # same rule as src/lib/scenarios.ts editKey
+        e["roadIds"] = sorted(e["roadIds"])
     return hashlib.sha1(json.dumps(_norm(e), sort_keys=True).encode()).hexdigest()
 
 
@@ -81,8 +83,12 @@ def simulate(req: SimulateRequest):
                         headers={"X-Sim-Source": "prebaked"})
     import scenario
 
+    import edits
+
     try:
         res = scenario.run_scenario(edit, f"live-{key[:8]}", n_sample=LIVE_SAMPLE, base=STATE["base"], verbose=False)
+    except edits.EditError as ex:   # plain message the site can show ("X is outside the area ...")
+        raise HTTPException(status_code=422, detail=str(ex)) from ex
     except NotImplementedError as ex:
         raise HTTPException(status_code=501, detail=str(ex)) from ex
     timings = res.pop("_timings", {})
@@ -95,4 +101,5 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="127.0.0.1", port=8000)
+
 

@@ -16,9 +16,23 @@ PLACES = {
     "Georgia Tech": (-84.3966, 33.7760),
     "Grady": (-84.3822, 33.7518),
     "Inman Park stn": (-84.3524, 33.7578),
+    "Clarkston": (-84.2396, 33.8095),          # City of Clarkston centre (approx., Church St)
+    "Downtown Decatur": (-84.2963, 33.7748),   # Decatur Square
+    "Midtown": (-84.3850, 33.7810),
+    "Airport terminal": (-84.4428, 33.6407),
 }
 PAIRS = [("Five Points", "Ponce City Market"), ("Peachtree Center", "Ponce City Market"),
-         ("Georgia Tech", "Grady"), ("Inman Park stn", "Georgia Tech")]
+         ("Georgia Tech", "Grady"), ("Inman Park stn", "Georgia Tech"),
+         ("Clarkston", "Five Points"), ("Downtown Decatur", "Midtown"), ("Airport terminal", "Five Points")]
+
+
+def transit_time(base, a, b):
+    """Modeled transit minutes between the in-box zones nearest to a and b (zone-to-zone)."""
+    z = base.dem.zones
+    lat0 = np.cos(np.deg2rad(33.765))
+    za = int(np.argmin(np.hypot((z.lng - a[0]) * lat0, z.lat - a[1])))
+    zb = int(np.argmin(np.hypot((z.lng - b[0]) * lat0, z.lat - b[1])))
+    return base.run.tsk.dzd[za, zb] / 60.0
 
 
 def drive_time(base, a, b, congested=True):
@@ -32,23 +46,31 @@ def drive_time(base, a, b, congested=True):
     return d / 60.0
 
 
+def wmedian(x, w):
+    o = np.argsort(x)
+    c = np.cumsum(np.asarray(w, float)[o])
+    return float(np.asarray(x)[o][np.searchsorted(c, c[-1] / 2)])
+
+
 def main():
     base = load_baseline()
     r, dem = base.run, base.dem
     jobs = dem.od.jobs.values
-    print(f"Population modeled: {jobs.sum():,} commuters in {len(dem.od):,} block-group pairs "
+    print(f"Population modeled: {jobs.sum():,.0f} commuters (internal {jobs[~dem.od.ext.values].sum():,.0f}, inbound {jobs[dem.od.ext.values].sum():,.0f}) in {len(dem.od):,} block-group pairs "
           f"(+{dem.intrazonal_jobs:,} intrazonal not assigned), LODES {dem.year}")
     print(f"Network: {base.net.n_nodes:,} nodes, {len(base.net.edges):,} directed edges")
-    print(f"Drive door-to-door minutes (job-weighted) median {np.median(np.repeat(r.drive_min, jobs)):.1f}")
+    print(f"Drive door-to-door minutes (job-weighted) median {wmedian(r.drive_min, jobs):.1f}")
     t = r.transit_min
     f = np.isfinite(t)
-    print(f"Transit minutes median {np.median(np.repeat(t[f], jobs[f])):.1f}; unreachable pairs {(~f).mean():.1%}")
+    print(f"Transit minutes median {wmedian(t[f], jobs[f]):.1f}; unreachable pairs {(~f).mean():.1%}")
     print(f"Transit share {np.average(r.p_transit, weights=jobs):.3f}, ASC {base.asc:.3f}")
     print("Point-to-point peak drive times (road only, + terminal minutes):")
     for a, b in PAIRS:
         ff = drive_time(base, PLACES[a], PLACES[b], congested=False)
         pk = drive_time(base, PLACES[a], PLACES[b], congested=True)
-        print(f"  {a:>16} -> {b:<18} free-flow {ff:5.1f}  peak {pk:5.1f}  door-to-door {pk + DRIVE_TERMINAL_MIN:5.1f} min")
+        tt = transit_time(base, PLACES[a], PLACES[b])
+        print(f"  {a:>16} -> {b:<18} free-flow {ff:5.1f}  peak {pk:5.1f}  door-to-door {pk + DRIVE_TERMINAL_MIN:5.1f} min"
+              f"  | transit zone-to-zone {tt:5.1f} min")
     # Population-level in-box drive time, congested vs free-flow (same entry points).
     from scipy.sparse.csgraph import dijkstra
 
@@ -64,7 +86,10 @@ def main():
     print(f"Inbound out-of-box leg (estimated): mean {np.average(asg.out_min[ext], weights=jobs[ext]):.1f} min")
     gw = base.net.gateways
     for name in ("Northeast Expressway", "Downtown Connector"):
-        gi = int(np.where(gw.name.values == name)[0][0])
+        hits = np.where(gw.name.values == name)[0]
+        if not len(hits):
+            continue
+        gi = int(hits[0])
         row = int(np.searchsorted(asg.sp.origins, gw.node_idx.values[gi]))
         fp = snap(base.net, [PLACES["Five Points"][0]], [PLACES["Five Points"][1]])[0]
         ff = dijkstra(m0, indices=[gw.node_idx.values[gi]])[0, fp] / 60
@@ -85,4 +110,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
 

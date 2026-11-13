@@ -4,6 +4,53 @@ Thin, end-to-end slice: real OSM roads, real MARTA GTFS, real LODES commuters ->
 BPR/MSA traffic assignment + frequency-based transit + logit mode choice ->
 contract-shaped `ScenarioResult` JSON for the Next.js frontend.
 
+## Handoff summary (read first)
+
+**Edit types** (`scenario.apply_edit`):
+
+| Type | State |
+|---|---|
+| `extend_line` | runs (prebaked `beltline-streetcar.sim.json`, live) |
+| `new_bus_route` | runs locally (`edits._new_bus`): road-routed between gazetteer stops, stops every 500 m, time = baseline car time x 1.3 + 20 s/stop, 15-min default headway, operating cost |
+| `new_rail_line` | runs locally (`edits.apply_new_line`): corridor geometry if given, else straight line at 18 km/h (streetcar) / 26 (light rail), streetcar capital benchmarks |
+| `change_frequency` | runs locally (`edits.apply_change_frequency`): headway of the named line's GTFS patterns, operating cost |
+| `brt_lane`, `close_road` | written in `edits.py` but **untested**; return 501 until `scenario.ENABLE_UNTESTED_EDITS = True` |
+| others | 501 |
+
+Stops outside the box, or fewer than two stops, raise `edits.EditError` -> HTTP 422 with a plain message.
+
+**Not deployed yet:** the deployed service (https://whatif-sim-gold.vercel.app, `sim/deploy/`) runs an older
+commit. The new code is NOT redeployed because live runs are too slow: 37-124 s per run with 2,000 agents
+(the model part is 3-9 s; the rest is display-path export: per-agent street routing in `display.Router`
+and per-tract polygon work in `verdict.assess`). Next step: profile `export.build_result` and cache/vectorise
+(`display.Router.route` dijkstra per connector; `equity.buffer_share`), then redeploy.
+
+**Scenario runs are warm-started** (`model.run_model(warm=...)`): the baseline object holds `seed` (the
+calibrated run) and `run` (the seed re-run through the same warm procedure with no edit), so an edit that
+changes nothing reproduces the baseline exactly. Rebuild the baseline cache after any model change.
+
+**Rebuild all core-box caches on a fresh machine** (~6 min plus downloads; files are keyed by the bbox
+tag `m84.420_33.730_m84.330_33.800` = `config.bbox_tag()`):
+```powershell
+python -m venv .venv; .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe fetch_data.py                       # OSM (Overpass) + GTFS + LODES + equity inputs
+#   if Overpass is down: download georgia-latest.osm.pbf (Geofabrik) into data/ and run osm_pbf.py
+.\.venv\Scripts\python.exe equity.py                           # data/cache/equity_2024.pkl
+.\.venv\Scripts\python.exe -c "import network as n, demand, transit, model; net=n.load_network(rebuild=True); n.export_major_roads(net); demand.load_demand(net, rebuild=True); transit.load_transit_base(rebuild=True); model.load_baseline(rebuild=True)"
+.\.venv\Scripts\python.exe run.py baseline; .\.venv\Scripts\python.exe run.py beltline   # prebaked files
+node --experimental-strip-types validate_contract.mjs ..\public\scenarios\beltline-streetcar.sim.json
+.\.venv\Scripts\python.exe check_paths.py                      # drawn paths stay on the network
+.\.venv\Scripts\python.exe prebake.py edits.json              # saved runs for [{id, edit}] (edit exactly as /api/plan returns it)
+```
+Runtime caches needed by `/simulate`: `data/cache/{baseline,demand,network,transit_base}_<tag>.pkl`,
+`data/cache/equity_2024.pkl`, `data/corridors_<tag>.json`, plus `src/data/gazetteer.json`.
+`WHATIF_CACHE_DIR` moves the cache dir, `WHATIF_BBOX` changes the box, `WHATIF_OUT_DIR` redirects exports.
+Request-time deps: `requirements-runtime.txt` (no OSMnx/geopandas). **Code and caches are a matched pair**:
+rebuild caches with the code you deploy, then `bash sim/deploy/deploy.sh` (see `deploy/README.md`).
+
+The extended box (`config.EXTENDED_BBOX`, Decatur/Clarkston/airport) builds via `WHATIF_BBOX` but a
+scenario takes ~4.5 min there and its caches (~240 MB) do not fit the deploy bundle; it is not the default.
+
 ## Setup (Windows PowerShell, from `sim/`)
 
 ```powershell
@@ -11,7 +58,24 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
+## Study box
+
+`config.BBOX` = **lng -84.47..-84.21, lat 33.62..33.83** (about 24 x 23 km): Downtown/Midtown, Decatur,
+Clarkston (to just past I-285), and Hartsfield-Jackson airport. Matches the frontend `STUDY_BBOX`. The
+original core box was -84.42..-84.33 x 33.73..33.80. Override with `WHATIF_BBOX="w,s,e,n"`.
+On this box the assignment network keeps tertiary-and-above roads only (`config.ASSIGN_MAJOR_ROADS_ONLY`,
+`network.ASSIGN_CLASSES`); drawing uses every drivable street (`network.load_display_network`).
+HOLC grades only exist for the 1938 city core, so `redlined` is false for every tract outside it.
+
 ## Fetch data (re-runnable; skips existing files; ~2 min, Overpass is the slow part)
+
+If the Overpass API is down (it was on 2026-11-13), build the drive graph from the Geofabrik Georgia
+extract instead (OpenStreetMap data, ODbL; mirrors OSMnx `network_type="drive"`, keeps traffic-signal nodes):
+```powershell
+# download https://download.geofabrik.de/north-america/us/georgia-latest.osm.pbf to data/ (342 MB), then
+.\.venv\Scripts\python.exe osm_pbf.py
+```
+The Eastside Trail / Ponce City Market corridor file was reused from the core-box fetch (same OSM ways).
 
 ```powershell
 .\.venv\Scripts\python.exe fetch_data.py            # all
@@ -59,6 +123,22 @@ Caches live in `data/cache/` keyed by bbox; delete them (or pass `--rebuild`) af
   Only `extend_line` / `new_rail_line` are implemented; other types return 501.
 - CORS open for `http://localhost:*` and `http://127.0.0.1:*`.
 
+## Display geometry and the path check
+
+Agent paths are drawn on real geometry only (display only; modeled minutes are unchanged):
+drive legs follow OSM edges, home/work connectors and walk legs are routed on every drivable street
+(undirected, as a walk proxy), transit rides follow GTFS `shapes.txt` cut between stops (bus hops with
+no usable shape are routed on streets), and the proposed line uses `line.path`. A straight stub from a
+home/work/stop point to its street is drawn only if <= 50 m (`display.MAX_STUB_M`); otherwise the drawn
+path starts/ends on the street. Paths are simplified with 5 m Douglas-Peucker between leg boundaries
+and waits (`display.SIMPLIFY_TOL_M`); timestamps are distance-proportional within each leg.
+
+```powershell
+.\.venv\Scripts\python.exe check_paths.py            # both scenario files
+```
+reports, per file, the share of drawn length farther than 25 m from any street / GTFS shape / proposed
+line, and agents with off-network runs > 25 / 60 / 150 m, plus the worst offenders.
+
 ## Module map
 
 | File | What it does |
@@ -76,6 +156,8 @@ Caches live in `data/cache/` keyed by bbox; delete them (or pass `--rebuild`) af
 | `equity.py` | tract polygons + ACS tenure/income/rent/burden + HOLC grade-D share per GA tract |
 | `costs.py` | streetcar per-mile cost benchmarks, annualisation, cost per new-rider trip |
 | `verdict.py` | five tests + grades, verdict label/headline/summary, who-pays items, tract and agent equity fields |
+| `display.py` | street router (walk proxy), GTFS shape cutting, path simplification for drawn trips |
+| `check_paths.py` | regression check: drawn paths vs network geometry |
 | `contract.py` | pydantic mirror of `src/lib/contract.ts` (1.1.0) |
 | `validate_contract.mjs` | validates output with the real zod schema (uses the repo's `node_modules`) |
 | `main.py` | FastAPI app |
@@ -89,6 +171,8 @@ Every number below is a named constant in the file listed. **Placeholders are no
 |---|---|---|---|
 | `BBOX` | -84.42,33.73,-84.33,33.80 | config | choice (same as frontend mock) |
 | `PEAK_HOUR_SHARE` | 0.25 | demand | **placeholder** for ACS B08302 departure share |
+| `SPLIT_DEST_MIN_JOBS`, `SPLIT_DEST_MAX_CONNECTORS` | destination BGs with >= 1,500 jobs spread over up to 6 connector nodes by block job counts | demand | simplification (Emory / airport otherwise load one node) |
+| Mode split damping | MSA average of p between outer loops; final p at final drive times | model | numerical stabiliser |
 | No work-from-home / absence reduction (LODES JT00 counts jobs) | | demand | simplification: peak volumes likely overstated |
 | `MAX_INBOUND_HOME_KM` | 80 km (drops 24,039 of 271,316 inbound) | demand | assumption |
 | Inbound home point | job-weighted mean of LODES home blocks per home tract | demand | real (aggregated) |
@@ -219,6 +303,8 @@ other edit types; operating cost; displacement look-ahead; Xpress / Ride Gwinnet
 4. Grow the box (`WHATIF_BBOX`), re-run `fetch_data.py` + `run.py baseline --rebuild`; check run time.
 5. Compute the remaining verdict tests (cost per rider, redlined share) so less is copied from the mock.
 6. GTFS `shapes.txt` for transit display paths; `brt_lane` / `change_frequency` edits reuse `apply_extend_line` pieces.
+
+
 
 
 

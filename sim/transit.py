@@ -35,7 +35,8 @@ TRANSFER_MAX_M = 300.0         # max straight-line walk between stops on a trans
 TRANSFER_PENALTY_MIN = 5.0     # perceived extra cost per transfer (also counted in minutes)
 MAX_HEADWAY_MIN = 60.0         # patterns rarer than this in the peak are dropped
 PEAK_WINDOW = (7 * 3600, 9 * 3600)   # headways measured over 7-9 AM weekday
-BBOX_BUFFER_DEG = 0.01         # keep stops slightly outside the box (stations at the edge)
+BBOX_BUFFER_DEG = 0.0          # bus/streetcar stops strictly inside the box (rail is kept region-wide);
+                               # stops outside the box have no street network for drawing walks
 INCLUDE_BUS = True             # rail + streetcar always; bus can be switched off
 MODE_NAMES = {0: "streetcar", 1: "rail", 2: "rail", 3: "bus"}
 
@@ -259,16 +260,34 @@ PNR_MAX_KM = 25.0                 # beyond this nobody drives to a station
 # TODO: bus feeders to rail, buses entering the box, parking capacity by station.
 
 
+SKIM_CHUNK = 128                  # dijkstra sources per batch (bounds memory on big boxes)
+
+
 @dataclass
 class TransitSkim:
     minutes: np.ndarray          # per OD unit (inf if unreachable)
-    dist: np.ndarray             # (R, Nn) seconds from each source row
-    pred: np.ndarray
+    dzd: np.ndarray              # (R, Z) seconds from each source row to each destination zone
     seconds: float
     src_node: np.ndarray = None  # graph node per source row (Zo zones, then rail A-nodes)
     row: np.ndarray = None       # source row per OD unit
     access_min: np.ndarray = None  # estimated out-of-graph access minutes per OD unit
     pnr: np.ndarray = None       # True if access is by car (park-and-ride)
+    csr: object = None
+    _cache: dict = field(default_factory=dict)
+
+    def row_paths(self, r: int):
+        """(dist, pred) arrays over all nodes for source row r, computed on demand."""
+        if r not in self._cache:
+            if len(self._cache) > 512:
+                self._cache.clear()
+            d, p = dijkstra(self.csr, directed=True, indices=[int(self.src_node[r])], return_predecessors=True)
+            self._cache[r] = (d[0], p[0])
+        return self._cache[r]
+
+    def __getstate__(self):  # do not pickle the on-demand cache
+        s = self.__dict__.copy()
+        s["_cache"] = {}
+        return s
 
 
 def rail_stop_index(tg: TransitGraph) -> np.ndarray:
@@ -282,7 +301,11 @@ def skim(tg: TransitGraph, od: pd.DataFrame) -> TransitSkim:
     base_A = 2 * Z
     rail = rail_stop_index(tg)
     src = np.r_[np.arange(Z), base_A + rail]
-    dist, pred = dijkstra(tg.csr, directed=True, indices=src, return_predecessors=True)
+    dzd = np.empty((len(src), Z))
+    for a in range(0, len(src), SKIM_CHUNK):
+        d = dijkstra(tg.csr, directed=True, indices=src[a:a + SKIM_CHUNK])
+        dzd[a:a + SKIM_CHUNK] = d[:, Z:2 * Z]
+        del d
     ext = od.ext.values
     n = len(od)
     mins = np.full(n, np.inf)
@@ -291,7 +314,7 @@ def skim(tg: TransitGraph, od: pd.DataFrame) -> TransitSkim:
     pnr = np.zeros(n, bool)
     io = od.o.values[~ext]
     row[~ext] = io
-    mins[~ext] = dist[io, Z + od.d.values[~ext]] / 60.0
+    mins[~ext] = dzd[io, od.d.values[~ext]] / 60.0
     if ext.any() and len(rail):
         lat0 = float(np.mean(tg.node_xy[:Z, 1]))
         rxy = _xy(tg.node_xy[base_A + rail, 0], tg.node_xy[base_A + rail, 1], lat0)
@@ -302,7 +325,7 @@ def skim(tg: TransitGraph, od: pd.DataFrame) -> TransitSkim:
         walk = np.where(dd <= ACCESS_MAX_M, dd * WALK_CIRCUITY / (WALK_SPEED_KPH / 3.6), np.inf)
         drive = np.where(dd <= PNR_MAX_KM * 1000, dd * PNR_DETOUR / (PNR_DRIVE_KPH / 3.6) + 60 * PNR_PENALTY_MIN, np.inf)
         acc = np.minimum(walk, drive)
-        ride = dist[Z + kk, (Z + od.d.values[ext])[:, None]]
+        ride = dzd[Z + kk, od.d.values[ext][:, None]]
         tot = acc + ride
         j = np.argmin(tot, axis=1)
         a = np.arange(len(j))
@@ -310,8 +333,8 @@ def skim(tg: TransitGraph, od: pd.DataFrame) -> TransitSkim:
         row[ext] = Z + kk[a, j]
         access[ext] = acc[a, j] / 60.0
         pnr[ext] = drive[a, j] < walk[a, j]
-    return TransitSkim(minutes=mins, dist=dist, pred=pred, seconds=time.time() - t, src_node=src,
-                       row=row, access_min=access, pnr=pnr)
+    return TransitSkim(minutes=mins, dzd=dzd, seconds=time.time() - t, src_node=src,
+                       row=row, access_min=access, pnr=pnr, csr=tg.csr)
 
 
 def trace(tg: TransitGraph, sk: TransitSkim, i: int, d: int) -> list[int]:
@@ -319,12 +342,13 @@ def trace(tg: TransitGraph, sk: TransitSkim, i: int, d: int) -> list[int]:
     r = int(sk.row[i])
     o = int(sk.src_node[r])
     target = tg.n_zones + d
-    if not np.isfinite(sk.dist[r, target]):
+    dist, pred = sk.row_paths(r)
+    if not np.isfinite(dist[target]):
         return []
     out = [target]
     cur = target
     while cur != o:
-        cur = sk.pred[r, cur]
+        cur = pred[cur]
         if cur < 0:
             return []
         out.append(int(cur))
@@ -337,25 +361,32 @@ def patterns_used(tg: TransitGraph, nodes: list[int]) -> set[int]:
 
 def patterns_on_paths(tg: TransitGraph, sk: TransitSkim, od: pd.DataFrame, pattern_ids: set[int]) -> np.ndarray:
     """Boolean per OD unit: does its transit path ride any pattern in pattern_ids?
-    Vectorised walk up the predecessor matrix."""
-    r = sk.row.copy()
-    src = sk.src_node[r]
-    cur = tg.n_zones + od.d.values
-    hit = np.zeros(len(od), bool)
-    alive = np.isfinite(sk.dist[r, cur])
+    Chunked over source rows; vectorised walk up each chunk's predecessor matrix."""
     mask = np.zeros(tg.csr.shape[0], bool)
     for pi in pattern_ids:
         mask |= tg.rs_pattern == pi
-    idx = np.where(alive)[0]
-    c, rr, ss = cur[idx], r[idx], src[idx]
-    while len(idx):
-        hit[idx] |= mask[c]
-        done = c == ss
-        c = np.where(done, -1, sk.pred[rr, c])
-        keep = c >= 0
-        idx, c, rr, ss = idx[keep], c[keep], rr[keep], ss[keep]
+    hit = np.zeros(len(od), bool)
+    rows_all = sk.row
+    dest = tg.n_zones + od.d.values
+    alive_all = np.isfinite(sk.minutes)
+    for a in range(0, len(sk.src_node), SKIM_CHUNK):
+        rows = np.arange(a, min(a + SKIM_CHUNK, len(sk.src_node)))
+        sel = np.where(alive_all & (rows_all >= a) & (rows_all < rows[-1] + 1))[0]
+        if not len(sel):
+            continue
+        _, pred = dijkstra(tg.csr, directed=True, indices=sk.src_node[rows], return_predecessors=True)
+        rr = rows_all[sel] - a
+        c = dest[sel]
+        ss = sk.src_node[rows_all[sel]]
+        idx = sel
+        while len(idx):
+            hit[idx] |= mask[c]
+            done = c == ss
+            c = np.where(done, -1, pred[rr, c])
+            keep = c >= 0
+            idx, c, rr, ss = idx[keep], c[keep], rr[keep], ss[keep]
+        del pred
     return hit
-
 
 # ---- real service frequencies for the frontend's train animation -----------
 # network.json line ids -> GTFS route_short_name(s) serving that track (in the box).
@@ -425,4 +456,6 @@ def export_service(path=None) -> dict:
     path.write_text(json.dumps(doc, indent=1), encoding="utf-8")
     print(f"transit service -> {path}")
     return doc
+
+
 

@@ -10,16 +10,27 @@ from pathlib import Path
 
 # (west, south, east, north) in WGS84 degrees. Override with env var
 # WHATIF_BBOX="west,south,east,north" to experiment without editing code.
-BBOX: tuple[float, float, float, float] = (-84.42, 33.73, -84.33, 33.80)
+# Core box (Downtown / Midtown / Old Fourth Ward / Eastside Beltline) = the LIVE box: a scenario
+# runs in ~15 s here. The extended box (Decatur, Clarkston, airport) builds and runs, but a
+# scenario takes ~4.5 min there, too slow for live simulation; build it with WHATIF_BBOX.
+CORE_BBOX = (-84.42, 33.73, -84.33, 33.80)
+EXTENDED_BBOX = (-84.47, 33.62, -84.21, 33.83)
+BBOX: tuple[float, float, float, float] = CORE_BBOX
 if os.environ.get("WHATIF_BBOX"):
     BBOX = tuple(float(x) for x in os.environ["WHATIF_BBOX"].split(","))  # type: ignore[assignment]
+
+# Large boxes: the assignment network keeps only tertiary+ roads (see network.ASSIGN_CLASSES).
+ASSIGN_MAJOR_ROADS_ONLY = (BBOX[2] - BBOX[0]) * (BBOX[3] - BBOX[1]) > 0.02
 
 SIM_DIR = Path(__file__).resolve().parent
 REPO_DIR = SIM_DIR.parent
 DATA_DIR = SIM_DIR / "data"
-CACHE_DIR = DATA_DIR / "cache"
-SCENARIO_OUT_DIR = REPO_DIR / "public" / "scenarios"
-MOCK_SCENARIO = SCENARIO_OUT_DIR / "beltline-streetcar.json"
+# Runtime caches (everything /simulate needs) live here; file names carry the bbox tag.
+CACHE_DIR = Path(os.environ["WHATIF_CACHE_DIR"]) if os.environ.get("WHATIF_CACHE_DIR") else DATA_DIR / "cache"
+PUBLIC_SCENARIOS = REPO_DIR / "public" / "scenarios"
+# WHATIF_OUT_DIR redirects exported *.sim.json files (e.g. to a staging folder).
+SCENARIO_OUT_DIR = Path(os.environ["WHATIF_OUT_DIR"]) if os.environ.get("WHATIF_OUT_DIR") else PUBLIC_SCENARIOS
+MOCK_SCENARIO = PUBLIC_SCENARIOS / "beltline-streetcar.json"
 
 
 def bbox_tag() -> str:
@@ -33,6 +44,8 @@ GTFS_FILE = DATA_DIR / "marta_gtfs.zip"
 XWALK_FILE = DATA_DIR / "ga_xwalk.csv.gz"
 LODES_GLOB = "ga_od_main_JT00_*.csv.gz"
 CORRIDOR_FILE = DATA_DIR / f"corridors_{bbox_tag()}.json"
+if (CACHE_DIR / CORRIDOR_FILE.name).exists():  # deployed services ship it inside the cache dir
+    CORRIDOR_FILE = CACHE_DIR / CORRIDOR_FILE.name
 
 # Official publisher URLs (verified 2026-11-13)
 LODES_OD_INDEX = "https://lehd.ces.census.gov/data/lodes/LODES8/ga/od/"
@@ -65,4 +78,8 @@ def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     SCENARIO_OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+
+
 

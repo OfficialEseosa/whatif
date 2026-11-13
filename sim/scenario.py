@@ -101,10 +101,13 @@ def path_on_road(net, corridor, a, b):
 
     from demand import snap
 
-    parts = corridor.split("_")
-    street = " ".join(p.capitalize() for p in parts[:-1]) + " " + STREET_SUFFIX.get(parts[-1], parts[-1].capitalize())
     e = net.edges
-    match = e["name"].str.contains(re.escape(street), case=False, regex=True).values
+    if corridor:
+        parts = corridor.split("_")
+        street = " ".join(p.capitalize() for p in parts[:-1]) + " " + STREET_SUFFIX.get(parts[-1], parts[-1].capitalize())
+        match = e["name"].str.contains(re.escape(street), case=False, regex=True).values
+    else:  # no corridor: plain shortest route by length
+        match = np.zeros(len(e), bool)
     w = e.length_m.values * np.where(match, 0.05, 1.0)
     # undirected: a streetcar can use either side of a two-way street
     u, v = e.u_idx.values, e.v_idx.values
@@ -258,26 +261,74 @@ def apply_extend_line(base, edit):
     return td, cap, line, notes, {pi for pi, p in enumerate(td.patterns) if p.route_id == route_id}
 
 
+SUPPORTED_TYPES = ("extend_line", "new_rail_line", "new_bus_route", "change_frequency")
+# brt_lane / close_road are implemented in edits.py but untested; they return 501 until enabled.
+ENABLE_UNTESTED_EDITS = False
+
+
+def apply_edit(base, edit) -> dict:
+    """Dispatch to the edit-type implementation; returns a Change dict (see edits.py)."""
+    import costs
+    import edits
+
+    t = edit["type"]
+    if t == "extend_line":
+        td, cap, line, notes, new_pats = apply_extend_line(base, edit)
+        L = _plen(line["path"]) if len(line["path"]) >= 2 else 0.0
+        import verdict
+
+        ns = [tuple(s["coord"]) for s in verdict.new_stops(edit)]
+        return {"td": td, "cap": cap, "closed": None, "extra_od": None, "road_only": False, "new_pats": new_pats,
+                "line": line, "notes": notes,
+                "change": {"track": line["path"], "stops": ns,
+                           "cost": costs.capital(L, "streetcar") if L else costs.not_applicable("no new track")}}
+    if t == "change_frequency":
+        return edits.apply_change_frequency(base, edit)
+    if t in ("brt_lane", "close_road") and not ENABLE_UNTESTED_EDITS:
+        # edits.apply_brt_lane / apply_close_road are written but not yet run end to end.
+        raise NotImplementedError(f"edit type '{t}' is not simulated yet (implementation in sim/edits.py is "
+                                  f"untested; set scenario.ENABLE_UNTESTED_EDITS = True to try it)")
+    if t == "brt_lane":
+        return edits.apply_brt_lane(base, edit)
+    if t == "close_road":
+        return edits.apply_close_road(base, edit)
+    if t in ("new_rail_line", "new_bus_route"):
+        return edits.apply_new_line(base, edit, build_corridor, path_on_road)
+    raise edits.EditError(f"edit type '{t}' is not supported by the simulator yet "
+                          f"(supported: {', '.join(SUPPORTED_TYPES)})")
+
+
 def run_scenario(edit: dict, scen_id: str, title: str | None = None, n_sample=export.DISPLAY_SAMPLE_SIZE,
                  base=None, verbose=True):
     t = time.time()
     base = base or load_baseline(verbose=verbose)
     t_base = time.time() - t
-    if edit["type"] not in ("extend_line", "new_rail_line"):
-        raise NotImplementedError(f"edit type {edit['type']} not implemented yet (TODO)")
-    td, cap, line, notes, new_pats = apply_extend_line(base, edit)
+    ch = apply_edit(base, edit)
+    td, cap, line, notes, new_pats = ch["td"], ch["cap"], ch["line"], ch["notes"], ch["new_pats"]
     t1 = time.time()
-    run, _ = run_model(base.net, base.dem, td, cap, asc=base.asc, verbose=verbose)
+    if ch["road_only"]:
+        run, _ = run_model(base.net, base.dem, td, cap, asc=base.asc, verbose=verbose, closed=ch["closed"],
+                           extra_od=ch["extra_od"], tsk=base.run.tsk, tg=base.run.tg, warm=base.seed or base.run)
+    else:
+        run, _ = run_model(base.net, base.dem, td, cap, asc=base.asc, verbose=verbose, closed=ch["closed"],
+                           extra_od=ch["extra_od"], warm=base.seed or base.run)
     t_model = time.time() - t1
 
     from transit import patterns_on_paths
 
-    rides_new = patterns_on_paths(run.tg, run.tsk, base.dem.od, new_pats)
-    riders_new = float((base.dem.od.jobs.values * run.p_transit * rides_new).sum())
+    if new_pats:
+        rides_new = patterns_on_paths(run.tg, run.tsk, base.dem.od, new_pats)
+        riders_new = float((base.dem.od.jobs.values * run.p_transit * rides_new).sum())
+    else:
+        riders_new = 0.0
+    cut = run.asg.cut_off
+    if cut is not None and cut.any():
+        notes.append(f"{base.dem.od.jobs.values[cut].sum():,.0f} commuters have no drive route without the closed "
+                     f"roads; they keep a {run.asg.drive_min[cut].min():,.0f}+ min drive time (so they switch mode).")
     edit_out = copy.deepcopy(edit)
     edit_out["assumptions"] = list(edit.get("assumptions") or []) + notes
     res = export.build_result(scen_id, title or edit["name"], edit_out, base, run, line, n_sample=n_sample,
-                              riders_on_line=riders_new)
+                              riders_on_line=riders_new, change=ch["change"])
     res["impact"]["notes"].append(
         f"Commuters whose transit path rides the new/extended line: {riders_new:,.0f}/day "
         f"(of {res['metrics']['proposed']['dailyTransitRiders']:,.0f} transit + park-and-ride commuters working in the box).")
@@ -312,5 +363,7 @@ def run_beltline(n_sample=export.DISPLAY_SAMPLE_SIZE):
     res = run_scenario(edit, BELTLINE_STREETCAR_ID, n_sample=n_sample)
     res.pop("_timings", None)
     return export.write_result(res, BELTLINE_STREETCAR_ID)
+
+
 
 

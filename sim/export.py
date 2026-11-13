@@ -19,6 +19,7 @@ import numpy as np
 import config
 from assign import DRIVE_TERMINAL_MIN, trace_path
 from contract import CONTRACT_VERSION, ScenarioResult
+import display as dsp
 from transit import trace
 
 DISPLAY_SAMPLE_SIZE = 3000
@@ -29,11 +30,12 @@ SEED = 42
 DEPART_MEAN_S = 8400
 DEPART_SD_S = 1800
 DEPART_CLIP_S = (3600, 13800)
-PATH_SIMPLIFY_DEG = 0.00008      # ~8 m Douglas-Peucker on drive paths
 NOISE_BUFFER_M = 150.0           # contract: noise/construction zone around new track
 NETWORK_URL = "/scenarios/network.json"
 ROAD_CLASSES = {"motorway", "trunk", "primary", "secondary", "tertiary", "motorway_link",
                 "trunk_link", "primary_link", "secondary_link", "tertiary_link"}
+# roads[] carries only the classes drawn by the frontend (major-roads.sim.json: motorway..secondary)
+ROAD_EFFECT_CLASSES = {"motorway", "trunk", "primary", "secondary", "motorway_link", "trunk_link"}
 # GTFS route_short_name -> contract RailLine ids (frontend network.json naming).
 # network.json splits heavy rail geographically (marta_north, marta_east_west, ...)
 # while GTFS routes are colours; this is the closest in-box match. Bus -> "bus_<n>".
@@ -85,22 +87,6 @@ def _seg_len(a, b):
     return float(np.hypot((b[0] - a[0]) * np.cos(lat0), b[1] - a[1]) * 111_320)
 
 
-def _simplify(coords, times, tol=PATH_SIMPLIFY_DEG):
-    from shapely.geometry import LineString
-
-    if len(coords) <= 3:
-        return coords, times
-    simp = list(LineString(coords).simplify(tol, preserve_topology=False).coords)
-    out_c, out_t, j = [], [], 0
-    for c in simp:
-        while j < len(coords) and (abs(coords[j][0] - c[0]) > 1e-12 or abs(coords[j][1] - c[1]) > 1e-12):
-            j += 1
-        if j >= len(coords):
-            return coords, times  # fallback, should not happen
-        out_c.append(coords[j]); out_t.append(times[j])
-    return out_c, out_t
-
-
 def _finish(mode, minutes, coords, times, lines=None):
     c = [[round(x, 5), round(y, 5)] for x, y in coords]
     t = [int(round(v)) for v in np.maximum.accumulate(np.asarray(times, float))]
@@ -113,34 +99,82 @@ def _finish(mode, minutes, coords, times, lines=None):
     return trip
 
 
-def drive_trip(net, run, pair, home, work, depart):
-    """Internal: path starts at home. Inbound: path starts at the gateway, at the time
-    the (estimated, not drawn) out-of-box leg ends."""
+class _Path:
+    """Accumulates legs; each moving leg gets distance-proportional times and its own
+    light simplification (display.SIMPLIFY_TOL_M), so no vertex is ever off its leg."""
+
+    def __init__(self):
+        self.c, self.t, self.forced = [], [], set()
+
+    def _same(self, a, b):
+        return abs(a[0] - b[0]) < 1e-9 and abs(a[1] - b[1]) < 1e-9
+
+    def move(self, coords, t0, t1, times=None):
+        coords = [list(map(float, x)) for x in coords]
+        if not coords:
+            return
+        if times is None:
+            coords = dsp.dedupe(coords)
+            times = dsp.timed(coords, t0, t1)
+        if self.c and self._same(self.c[-1], coords[0]):
+            coords, times = coords[1:], times[1:]
+        if self.c:
+            self.forced.add(len(self.c) - 1)   # leg boundary
+        self.c += coords
+        self.t += list(times)
+        self.forced.add(len(self.c) - 1)
+
+    def wait(self, t):
+        if self.c:
+            self.forced.add(len(self.c) - 1)
+            self.c.append(list(self.c[-1]))
+            self.t.append(t)
+            self.forced.add(len(self.c) - 1)
+
+    def done(self):
+        """Douglas-Peucker (display.SIMPLIFY_TOL_M) between forced vertices (leg boundaries,
+        waits, edge-time changes are interpolated); returns (coords, times)."""
+        if len(self.c) <= 2:
+            return self.c, self.t
+        f = sorted(self.forced | {0, len(self.c) - 1})
+        keep = []
+        for a, b in zip(f[:-1], f[1:]):
+            idx = dsp.simplify_idx(self.c[a:b + 1])
+            keep += [a + k for k in idx][(1 if keep else 0):]
+        return [self.c[k] for k in keep], [self.t[k] for k in keep]
+
+
+def drive_trip(net, run, pair, home, work, depart, router):
+    """Internal: home -> (local streets) -> modeled route -> (local streets) -> work.
+    Inbound: starts at the gateway node when the (estimated, not drawn) out-of-box leg
+    ends. The local connector legs are drawn inside the modeled terminal minutes."""
     asg = run.asg
     edges = trace_path(net, asg.sp, int(asg.od_row[pair]), int(asg.od_dest[pair]))
     half = DRIVE_TERMINAL_MIN * 30.0
     out_s = float(asg.out_min[pair]) * 60.0 if asg.out_min is not None else 0.0
-    if out_s > 0:
-        gnode = net.gateways.node_idx.values[int(asg.gateway[pair])]
-        coords, times = [list(net.node_xy[gnode])], [depart + half + out_s]
-    else:
-        coords, times = [list(home)], [depart]
+    e = net.edges
+    start = int(e.u_idx.values[edges[0]]) if edges else int(asg.od_dest[pair])
+    end = int(e.v_idx.values[edges[-1]]) if edges else int(asg.od_dest[pair])
+    P = _Path()
     t = depart + half + out_s
+    if out_s > 0:
+        P.move([list(net.node_xy[start])], t, t)
+    else:
+        P.move(router.route(home, net.node_xy[start]), depart, t)
+    rc, rt = [], []                       # modeled route = one leg with per-edge times
     for ei in edges:
-        g = net.edge_geoms[ei]
-        seg = [_seg_len(g[k], g[k + 1]) for k in range(len(g) - 1)]
-        tot = sum(seg) or 1.0
+        g = dsp.dedupe(net.edge_geoms[ei])
         et = float(asg.time_s[ei])
-        if not coords or coords[-1] != g[0]:
-            coords.append(g[0]); times.append(t)
-        acc = 0.0
-        for k in range(1, len(g)):
-            acc += seg[k - 1]
-            coords.append(g[k]); times.append(t + et * acc / tot)
+        tt = dsp.timed(g, t, t + et)
+        if rc:
+            g, tt = g[1:], tt[1:]
+        rc += g
+        rt += tt
         t += et
-    coords.append(list(work)); times.append(t + half)
-    coords, times = _simplify(coords, times)
-    return _finish("drive", run.drive_min[pair], coords, times)
+    if rc:
+        P.move(rc, None, None, times=rt)
+    P.move(router.route(net.node_xy[end], work), t, t + half)
+    return _finish("drive", run.drive_min[pair], *P.done())
 
 
 def _in_box(xy, buf=0.002):
@@ -148,9 +182,10 @@ def _in_box(xy, buf=0.002):
     return w - buf <= xy[0] <= e + buf and s - buf <= xy[1] <= n + buf
 
 
-def transit_trip(dem, run, pair, home, work, depart):
-    """Internal: path starts at home. Inbound: the estimated access leg is not drawn and
-    the rail ride is drawn only from where it enters the box (gateway station)."""
+def transit_trip(dem, run, pair, home, work, depart, router):
+    """Walk legs routed on streets, rides on GTFS shapes / the proposed line path.
+    Inbound: the estimated access leg is not drawn and the ride is drawn only from
+    where it enters the box."""
     tg, sk = run.tg, run.tsk
     d = int(dem.od.d.values[pair])
     ext = bool(dem.od.ext.values[pair])
@@ -159,39 +194,38 @@ def transit_trip(dem, run, pair, home, work, depart):
         return None
     r = int(sk.row[pair])
     t_acc = float(sk.access_min[pair]) * 60.0 if sk.access_min is not None else 0.0
-    o = r  # row into dist
-    coords, times, lines = [], [], []
-    for idx, nd in enumerate(nodes):
-        xy = list(tg.node_xy[nd])
-        if idx == 0 and not ext:
-            xy = list(home)
-        elif idx == len(nodes) - 1:
-            xy = list(work)
-        tt = depart + t_acc + float(sk.dist[o, nd])
-        prev = nodes[idx - 1] if idx else None
-        pi = int(tg.rs_pattern[nd])
-        if pi >= 0:
-            p = tg.patterns[pi]
+    dist_r, _ = sk.row_paths(r)
+    T = lambda nd: depart + t_acc + float(dist_r[nd])  # noqa: E731
+    kind = tg.node_kind
+    xy = lambda nd: list(tg.node_xy[nd])  # noqa: E731
+    P, lines = _Path(), []
+    first = nodes[0]
+    if kind[first] != 0:          # inbound: starts at the boarding station
+        P.move([xy(first)], T(first), T(first))
+    for a, b in zip(nodes[:-1], nodes[1:]):
+        ka, kb = kind[a], kind[b]
+        if ka == 0 and kb == 2:                       # home -> stop (walk)
+            P.move(router.route(home, xy(b)), depart, T(b))
+        elif kb == 4 and ka in (2, 3):                # board: wait at the stop
+            P.wait(T(b))
+        elif ka == 4 and kb == 4:                     # ride one hop
+            p = tg.patterns[int(tg.rs_pattern[a])]
             lines.append(LINE_IDS.get(p.route_name, "proposed" if p.route_id.startswith("proposed")
                                       else f"bus_{p.route_name}"))
-            # in-vehicle hop with a drawn path: interpolate interior vertices
-            hp = None
-            if prev is not None and tg.rs_pattern[prev] == pi and p.hop_paths:
-                hp = p.hop_paths[int(tg.rs_pos[prev])]
-            if hp:
-                t0 = depart + t_acc + float(sk.dist[o, prev])
-                seg = [_seg_len(hp[k], hp[k + 1]) for k in range(len(hp) - 1)]
-                tot = sum(seg) or 1.0
-                acc = 0.0
-                for k in range(1, len(hp) - 1):
-                    acc += seg[k - 1]
-                    coords.append(hp[k]); times.append(t0 + (tt - t0) * acc / tot)
-        coords.append(xy); times.append(tt)
-    if ext:  # drop the out-of-box part of the drawn path
-        k = next((i for i, c in enumerate(coords) if _in_box(c)), len(coords) - 1)
-        coords, times = coords[k:], times[k:]
+            hp = p.hop_paths[int(tg.rs_pos[a])] if p.hop_paths else None
+            P.move(hp if hp else router.route(xy(a), xy(b)), T(a), T(b))
+        elif ka == 4 and kb == 3:                     # alight
+            pass
+        elif ka == 3 and kb == 3:                     # transfer walk
+            P.move(router.route(xy(a), xy(b)), T(a), T(b))
+        elif ka == 3 and kb == 1:                     # stop -> work (walk)
+            P.move(router.route(xy(a), work), T(a), T(b))
+    if ext:  # drop the out-of-box part of the drawn path (cut at a vertex, still on the shape)
+        k = next((i for i, c in enumerate(P.c) if _in_box(c)), len(P.c) - 1)
+        P.c, P.t = P.c[k:], P.t[k:]
     mode = "park_ride" if (sk.pnr is not None and sk.pnr[pair]) else "transit"
-    return _finish(mode, run.transit_min[pair], coords, times, lines)
+    c, t = P.done()
+    return _finish(mode, run.transit_min[pair], c, t, lines)
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +246,7 @@ def road_effects(net, base_run, prop_run):
     vp = prop_run.asg.vc if prop_run is not None else vb
     tb = base_run.asg.time_s
     tp = prop_run.asg.time_s if prop_run is not None else tb
-    m = e.highway.isin(ROAD_CLASSES).values
+    m = e.highway.isin(ROAD_EFFECT_CLASSES).values
     df = e.loc[m, ["way_id", "oneway"]].assign(vb=vb[m], vp=vp[m], dt=(tp - tb)[m])
     out = []
     for wid, g in df.groupby("way_id"):
@@ -286,20 +320,28 @@ def load_mock():
 
 
 def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=DISPLAY_SAMPLE_SIZE,
-                 seed=SEED, riders_on_line: float = 0.0) -> dict:
+                 seed=SEED, riders_on_line: float = 0.0, change: dict | None = None) -> dict:
     net, dem, brun = base.net, base.dem, base.run
     prun = prop_run or brun
     line = line or {"path": [], "stops": []}
     s = draw_sample(dem, n_sample, seed)
-    noise = _near_line(s.home, line["path"], NOISE_BUFFER_M)
+    import verdict as vd
+
+    change = change or vd.default_change(edit, line)
+    noise = _near_line(s.home, change.get("track") or [], NOISE_BUFFER_M)
 
     import verdict as vd
 
     mb = metrics(dem, brun, n_sample)
     mp = metrics(dem, prun, n_sample)
     roads = road_effects(net, brun, prop_run)
-    A = vd.assess(base, prop_run, edit, line, riders_on_line, mb, mp, roads)
+    A = vd.assess(base, prop_run, edit, line, riders_on_line, mb, mp, roads, change=change)
     eq_rng = np.random.default_rng(seed + 1)  # separate stream: renter sampling
+    from network import load_display_network
+
+    router = dsp.router_for(load_display_network())
+    for run in {id(brun): brun, id(prun): prun}.values():
+        dsp.attach_hop_paths(run.td, router)
 
     agents = []
     for i in range(n_sample):
@@ -311,9 +353,9 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
         for run in (brun, prun):
             tr = None
             if s.u[i] < run.p_transit[pi]:
-                tr = transit_trip(dem, run, pi, s.home[i], s.work[i], s.depart[i])
+                tr = transit_trip(dem, run, pi, s.home[i], s.work[i], s.depart[i], router)
             if tr is None:
-                tr = drive_trip(net, run, pi, s.home[i], s.work[i], s.depart[i])
+                tr = drive_trip(net, run, pi, s.home[i], s.work[i], s.depart[i], router)
             trips.append(tr)
         delta = trips[1]["minutes"] - trips[0]["minutes"]
         tract_id = str(dem.od.home_tract.values[pi])  # inbound: home tract outside the box
@@ -407,6 +449,14 @@ def write_result(res: dict, name: str | None = None):
     path.write_text(json.dumps(res, separators=(",", ":")), encoding="utf-8")
     print(f"wrote {path} ({path.stat().st_size/1e6:.2f} MB, {len(res['agents'])} agents)")
     return path
+
+
+
+
+
+
+
+
 
 
 
