@@ -33,8 +33,10 @@ NETWORK_URL = "/scenarios/network.json"
 ROAD_CLASSES = {"motorway", "trunk", "primary", "secondary", "tertiary", "motorway_link",
                 "trunk_link", "primary_link", "secondary_link", "tertiary_link"}
 # GTFS route_short_name -> contract RailLine ids (frontend network.json naming).
-LINE_IDS = {"ATLSC": "atlanta_streetcar", "RED": "marta_red", "GOLD": "marta_gold",
-            "BLUE": "marta_blue", "GREEN": "marta_green"}
+# network.json splits heavy rail geographically (marta_north, marta_east_west, ...)
+# while GTFS routes are colours; this is the closest in-box match. Bus -> "bus_<n>".
+LINE_IDS = {"ATLSC": "atlanta_streetcar", "RED": "marta_north", "GOLD": "marta_north",
+            "BLUE": "marta_east_west", "GREEN": "marta_east_west"}
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +152,10 @@ def transit_trip(dem, run, pair, home, work, depart):
             lines.append(LINE_IDS.get(p.route_name, "proposed" if p.route_id.startswith("proposed")
                                       else f"bus_{p.route_name}"))
             # in-vehicle hop with a drawn path: interpolate interior vertices
+            hp = None
             if prev is not None and tg.rs_pattern[prev] == pi and p.hop_paths:
-                j = int(tg.rs_pos[prev])
-                hp = p.hop_paths[j]
+                hp = p.hop_paths[int(tg.rs_pos[prev])]
+            if hp:
                 t0 = depart + float(sk.dist[o, prev])
                 seg = [_seg_len(hp[k], hp[k + 1]) for k in range(len(hp) - 1)]
                 tot = sum(seg) or 1.0

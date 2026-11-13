@@ -107,8 +107,10 @@ def load_gtfs() -> TransitData:
     for trip_id, g in groups:
         if len(g) < 2:
             continue
-        t_first = g.t.iloc[0]
-        if not (PEAK_WINDOW[0] <= t_first < PEAK_WINDOW[1]):
+        # A trip counts toward the peak if it is at its middle in-box stop in the window
+        # (first-stop time undercounts long trips that start before 7 AM).
+        t_mid = g.t.iloc[len(g) // 2]
+        if not (PEAK_WINDOW[0] <= t_mid < PEAK_WINDOW[1]):
             continue
         r, d = trip_info.loc[trip_id]
         by_rd.setdefault((r, d), []).append((tuple(g.stop_id), tuple(np.diff(g.t.values)), tuple(np.diff(g.seq.values))))
@@ -292,4 +294,5 @@ def patterns_on_paths(tg: TransitGraph, sk: TransitSkim, od: pd.DataFrame, patte
         keep = c >= 0
         idx, c, oo = idx[keep], c[keep], oo[keep]
     return hit
+
 
