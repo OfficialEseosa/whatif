@@ -24,7 +24,9 @@ const SEED = 20261113;
 const N_AGENTS = 3000;
 const POPULATION = 249316; // placeholder "modeled commuters"
 const SCALE = POPULATION / N_AGENTS;
-const BBOX = [-84.42, 33.73, -84.33, 33.8];
+// Agents and tract hexes live in the core; the network covers the whole study box (src/lib/geo.ts).
+const { STUDY_BBOX, CORE_BBOX } = await import(pathToFileURL(path.join(ROOT, "src/lib/geo.ts")).href);
+const BBOX = [...CORE_BBOX];
 const HEADWAY_MIN = 10;
 const LINE_KMH = 21;
 const WALK_KMH = 4.8;
@@ -182,7 +184,7 @@ const overlays = [
 ];
 const network = C.NetworkSchema.parse({
   version: "osm-2026-11-13",
-  bbox: BBOX,
+  bbox: [...STUDY_BBOX],
   source: "OpenStreetMap contributors (ODbL), Overpass snapshot in scripts/data/osm-atl-core.json. Overlay polygons marked placeholder are hand-drawn stand-ins.",
   roads, rail, stations, beltline, overlays,
 });
