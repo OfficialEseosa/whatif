@@ -9,8 +9,7 @@
     "lint": "eslint",
     "mock": "node --no-warnings scripts/make-mock-scenario.mjs",
     "fetch:osm": "node scripts/fetch-osm.mjs",
-    "check:api": "node --no-warnings scripts/check-api.mjs",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./tests/setup/register.mjs --test \"tests/**/*.test.ts\""
+    "check:api": "node --no-warnings scripts/check-api.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.6.0",
