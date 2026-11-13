@@ -34,3 +34,5 @@ export function clock(sec: number): string {
 }
 
 export const pct = (x: number) => `${Math.round(x * 100)}%`;
+/** Percent with one decimal: 0.1204 -> "12.0%". */
+export const pct1 = (x: number) => `${(x * 100).toFixed(1)}%`;

@@ -25,7 +25,9 @@ const check = (name, schema, value) => {
 const plan = check("POST /api/plan (prompt)", C.PlanResponseSchema, await post("/api/plan", { text: "extend the streetcar to Ponce City Market", mode: "prompt" }));
 const article = check("POST /api/plan (article)", C.PlanResponseSchema, await post("/api/plan", { text: "Backers say it could carry 10,000 riders a day.", mode: "article" }));
 const sim = check("POST /api/simulate", C.ScenarioResultSchema, await post("/api/simulate", { edit: plan.edit, claims: article.claims }));
-console.log(`     ${sim.agents.length} agents, ${sim.claims.length} claims, isMock=${sim.isMock}`);
+console.log(`     source=${sim.source} isMock=${sim.isMock} agents=${sim.agents.length} claims=${sim.claims.length} mockSections=${(sim.mockSections ?? []).length}`);
+const other = check("POST /api/simulate (unmatched edit)", C.ScenarioResultSchema, await post("/api/simulate", { edit: { type: "change_frequency", name: "Loop every 8 min", stops: [], baseLineId: "atlanta_streetcar", headwayMin: 8 } }));
+console.log(`     source=${other.source} isMock=${other.isMock}`);
 const p = sim.personas[0];
 check("POST /api/persona", C.PersonaResponseSchema, await post("/api/persona", { scenarioId: sim.id, personaId: p.id, messages: [{ role: "user", content: "How does this change your commute?" }] }));
 const bad = await fetch(base + "/api/plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });

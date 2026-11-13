@@ -16,7 +16,7 @@ import { photorealLayer } from "./layers/photoreal3d";
 import { railLayers } from "./layers/rail";
 import { beltlineLayer } from "./layers/beltline";
 import { spilloverLayer } from "./layers/spillover";
-import { tractsLayer } from "./layers/tracts";
+import { tractsLayers } from "./layers/tracts";
 import { rentPressureLayer } from "./layers/rentPressure";
 import { historyOverlayLayers } from "./layers/historyOverlay";
 import { proposedLineLayers } from "./layers/proposedLine";
@@ -74,7 +74,7 @@ export default function DeckMap() {
   else if (!photoreal && GOOGLE_KEY && session) layers.push(google2dLayer(session, GOOGLE_KEY));
   else if (network) layers.push(keylessRoadsLayer(network, built));
   // --- analysis layers
-  if (built && scenario) layers.push(tractsLayer(scenario.tracts, { opacity: switchProgress, photoreal }));
+  if (built && scenario) layers.push(...tractsLayers(scenario.tracts, { opacity: switchProgress, photoreal, bbox: network?.bbox }));
   if (network && activeHistory) layers.push(...historyOverlayLayers(network, activeHistory.overlay, photoreal));
   if (built && scenario && network) {
     const hl = highlightZone === "spillover" ? scenario.whoPays.items.find((i) => i.zone === "spillover" && i.roadIds)?.roadIds : undefined;

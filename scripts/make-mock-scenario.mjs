@@ -567,6 +567,7 @@ const scenario = {
   title: edit.name,
   edit,
   isMock: true,
+  source: "mock",
   generatedAt: "2026-11-13T00:00:00.000Z",
   timeWindow: { startSec: 0, endSec: 14400 },
   line: { path: linePath, stops: lineStops },

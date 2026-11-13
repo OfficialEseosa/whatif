@@ -134,3 +134,12 @@ a { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ---------- provenance ---------- */
+.badge-source { color: var(--text); text-transform: none; }
+.source-mock { color: var(--muted); border-style: dashed; }
+.source-live_sim { color: var(--good); }
+.source-prebaked_sim { color: var(--accent); }
+.badge-mock-section { color: var(--fair); border-style: dashed; text-transform: none; }
+.is-mock-section { outline: 1px dashed var(--fair); outline-offset: 3px; border-radius: var(--radius); }
+.bar-neutral { background: var(--border); }

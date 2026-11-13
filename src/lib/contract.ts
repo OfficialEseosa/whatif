@@ -19,7 +19,7 @@
  */
 import { z } from "zod";
 
-export const CONTRACT_VERSION = "1.0.0";
+export const CONTRACT_VERSION = "1.1.0"; // 1.1.0: optional ScenarioResult.source + mockSections
 
 /* ------------------------------------------------------------------------- */
 /* Primitives                                                                 */
@@ -503,8 +503,52 @@ export const LookaheadSchema = z.object({
 });
 export type Lookahead = z.infer<typeof LookaheadSchema>;
 
+/** Where a ScenarioResult came from. /api/simulate always sets it on the way out. */
+export const ScenarioSourceSchema = z.enum([
+  "live_sim", // computed just now by the Python service at SIM_URL
+  "prebaked_sim", // a sim run saved as public/scenarios/<id>.sim.json
+  "mock", // the frontend's seeded mock generator (every number is a placeholder)
+]);
+export type ScenarioSource = z.infer<typeof ScenarioSourceSchema>;
+
+/**
+ * Vocabulary for ScenarioResult.mockSections: parts of a sim result that were NOT computed by
+ * the sim (copied from the mock / placeholders). A key also covers everything below it
+ * ("verdict" covers "verdict.headline"). The UI marks these sections as mock.
+ */
+export const MOCK_SECTION_KEYS = [
+  "verdict.label",
+  "verdict.headline",
+  "verdict.summary",
+  "verdict.grades",
+  "verdict.alternatives",
+  "verdict.tests.time_saved",
+  "verdict.tests.new_riders",
+  "verdict.tests.cost_per_rider",
+  "verdict.tests.redlined_benefit_share",
+  "verdict.tests.renters_rent_pressure",
+  "impact.tiles",
+  "impact.calibration",
+  "impact.modeSplit",
+  "impact.minutesSavedByEarnings",
+  "whoPays.items",
+  "whoPays.approval",
+  "claims",
+  "personas",
+  "lookahead",
+  "tracts.equity", // TractEffect.redlined / rentPressure / renterShare / households
+  "agents.equity", // Agent.renter / stake.rentPressure / stake.costShareUsdYr / displacementRisk
+] as const;
+
 export const ScenarioResultSchema = z.object({
   id: z.string(),
+  /** Optional (added in 1.1.0). Set by /api/simulate; the sim may also emit it. */
+  source: ScenarioSourceSchema.optional(),
+  /**
+   * Optional (added in 1.1.0). Keys from MOCK_SECTION_KEYS that are placeholders in this result.
+   * Ignored when isMock is true (then everything is mock).
+   */
+  mockSections: z.array(z.string()).optional(),
   contractVersion: z.string(),
   title: z.string(),
   edit: ScenarioEditSchema,

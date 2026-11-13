@@ -1,8 +1,14 @@
 import type { Persona } from "@/lib/contract";
+import { MockTag } from "../MockTag";
 
-export function TownHallPane({ personas, onSelect }: { personas: Persona[]; onSelect: (p: Persona) => void }) {
+export function TownHallPane({ personas, onSelect, mock }: { personas: Persona[]; onSelect: (p: Persona) => void; mock: boolean }) {
   return (
-    <div className="stack-sm">
+    <div className={`stack-sm ${mock ? "is-mock-section" : ""}`}>
+      {mock && (
+        <p className="small">
+          <MockTag show what="the residents" /> These residents and their numbers are mock placeholders; they are not drawn from this simulation run.
+        </p>
+      )}
       <p className="small muted">Each resident sees only their own numbers. Click one to talk to them.</p>
       {personas.map((p) => (
         <button key={p.id} className="card" onClick={() => onSelect(p)}>
