@@ -42,6 +42,54 @@ export type LiveView = { longitude: number; latitude: number; zoom: number; pitc
 export type Drawer = "history" | "layers";
 export type Attribution = { google: boolean; text: string };
 
+/** Map layers the user can switch on and off (the UI shell renders the toggles from LAYER_META). */
+export type LayerKey =
+  | "proposedLine"
+  | "martaRail"
+  | "streetcar"
+  | "beltline"
+  | "tunnels"
+  | "vehicles"
+  | "commuters"
+  | "roads"
+  | "tractEffects"
+  | "spillover"
+  | "rentPressure"
+  | "history";
+
+export type LayerGroup = "Transit" | "Commuters" | "After a plan is built" | "Context";
+
+/** Labels, groups and swatches for the layer toggles. `colorKey` is a key of MAP_COLORS (src/components/map/colors.ts). */
+export const LAYER_META: Record<LayerKey, { label: string; group: LayerGroup; requiresResult?: boolean; colorKey?: string }> = {
+  proposedLine: { label: "Proposed line", group: "After a plan is built", requiresResult: true, colorKey: "proposed" },
+  martaRail: { label: "MARTA rail", group: "Transit", colorKey: "rail" },
+  streetcar: { label: "Streetcar", group: "Transit", colorKey: "streetcar" },
+  beltline: { label: "Beltline trail", group: "Context", colorKey: "beltline" },
+  tunnels: { label: "Rail in tunnel", group: "Transit", colorKey: "tunnel" },
+  vehicles: { label: "Trains and streetcars", group: "Transit", colorKey: "martaTrain" },
+  commuters: { label: "Commuters", group: "Commuters", colorKey: "tripDrive" },
+  roads: { label: "Road network", group: "Context", colorKey: "roadLegend" },
+  tractEffects: { label: "Faster / slower commutes by tract", group: "After a plan is built", requiresResult: true, colorKey: "gain" },
+  spillover: { label: "Traffic spillover", group: "After a plan is built", requiresResult: true, colorKey: "loss" },
+  rentPressure: { label: "Rent pressure zone", group: "After a plan is built", requiresResult: true, colorKey: "rentPressure" },
+  history: { label: "History overlay", group: "Context", colorKey: "history" },
+};
+
+export const DEFAULT_LAYER_VISIBILITY: Record<LayerKey, boolean> = {
+  proposedLine: true,
+  martaRail: true,
+  streetcar: true,
+  vehicles: true,
+  commuters: true,
+  tractEffects: true,
+  roads: false,
+  beltline: false,
+  tunnels: false,
+  spillover: false,
+  rentPressure: false,
+  history: false,
+};
+
 export const DEFAULT_TEXT: Record<PlanMode, string> = {
   prompt: "extend the streetcar along the Beltline to Ponce City Market",
   article: SAMPLE_ARTICLE,
@@ -87,6 +135,8 @@ type State = {
   /** 0..1 share of agents shown on their proposed trip. */
   switchProgress: number;
   chat: { personaId: string; messages: ChatMessage[]; pending: boolean } | null;
+  /** Which map layers are drawn. Features that switch layers (history cards, Underground, Who pays) set these. */
+  layerVisibility: Record<LayerKey, boolean>;
 };
 
 type Actions = {
@@ -99,6 +149,8 @@ type Actions = {
   flyTo: (patch: Partial<CameraTarget>, ms?: number) => void;
   openChat: (personaId: string) => void;
   closeChat: () => void;
+  setLayerVisible: (key: LayerKey, on: boolean) => void;
+  toggleLayer: (key: LayerKey) => void;
 };
 
 export const useStore = create<State & Actions>((set) => ({
@@ -128,6 +180,7 @@ export const useStore = create<State & Actions>((set) => ({
   lineProgress: 0,
   switchProgress: 0,
   chat: null,
+  layerVisibility: DEFAULT_LAYER_VISIBILITY,
 
   set: (patch) => set(patch),
   setInputMode: (m) => set({ inputMode: m, text: DEFAULT_TEXT[m] }),
@@ -145,10 +198,31 @@ export const useStore = create<State & Actions>((set) => ({
     }),
   openChat: (personaId) => set({ chat: { personaId, messages: [], pending: false } }),
   closeChat: () => set({ chat: null }),
+  setLayerVisible: (key, on) => set((s) => ({ layerVisibility: { ...s.layerVisibility, [key]: on } })),
+  toggleLayer: (key) => set((s) => ({ layerVisibility: { ...s.layerVisibility, [key]: !s.layerVisibility[key] } })),
 }));
+
+/**
+ * Features that used to switch layers directly now flip the layer flags (once, on change), so the
+ * toggles always reflect what is drawn and the user can still override afterwards:
+ *   picking a history card -> history on (off when it is cleared)
+ *   Underground on/off      -> tunnels on/off
+ *   Who pays tab, a look-ahead horizon or the rent-pressure highlight -> rent pressure on (off when none apply)
+ */
+const wantsRentPressure = (s: State) => s.tab === "whoPays" || s.horizon !== "opening" || s.highlightZone === "rent_pressure";
+useStore.subscribe((s, prev) => {
+  const patch: Partial<Record<LayerKey, boolean>> = {};
+  if (s.activeHistoryId !== prev.activeHistoryId) patch.history = s.activeHistoryId !== null;
+  if (s.underground !== prev.underground) patch.tunnels = s.underground;
+  if (wantsRentPressure(s) !== wantsRentPressure(prev)) patch.rentPressure = wantsRentPressure(s);
+  const changed = (Object.keys(patch) as LayerKey[]).filter((k) => s.layerVisibility[k] !== patch[k]);
+  if (changed.length) useStore.setState({ layerVisibility: { ...s.layerVisibility, ...patch } });
+});
+
 
 /** The scenario whose agents/geometry the map should draw right now. */
 export const selectMapScenario = (s: State) => s.scenario ?? s.preview;
 
-// Debug handle for the browser console (e.g. __whatifStore.getState()). Harmless in production.
-if (typeof window !== "undefined") (window as unknown as { __whatifStore?: typeof useStore }).__whatifStore = useStore;
+// Debug handle for the browser console (e.g. __whatifStore.getState()): dev builds, or NEXT_PUBLIC_WHATIF_DEBUG=1.
+if ((process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_WHATIF_DEBUG === "1") && typeof window !== "undefined")
+  (window as unknown as { __whatifStore?: typeof useStore }).__whatifStore = useStore;
