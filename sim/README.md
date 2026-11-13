@@ -24,6 +24,9 @@ python -m venv .venv
 | Eastside Trail + Ponce City Market geometry | Overpass via OSMnx | `data/corridors_<bbox>.json` |
 | MARTA GTFS (rail, bus, streetcar) | https://www.itsmarta.com/google_transit_feed/google_transit.zip | `data/marta_gtfs.zip` |
 | LODES8 GA OD main JT00 (latest year, currently 2024) | https://lehd.ces.census.gov/data/lodes/LODES8/ga/od/ | `data/ga_od_main_JT00_<year>.csv.gz` |
+| Census cartographic boundary tracts GA 2023 | https://www2.census.gov/geo/tiger/GENZ2023/shp/cb_2023_13_tract_500k.zip | `data/cb_2023_13_tract_500k.zip` |
+| ACS 2024 5-year B25003/B19013/B25064/B25070 (table-based summary files) | https://www2.census.gov/programs-surveys/acs/summary_file/2024/table-based-SF/data/5YRData/ | `data/acsdt5y2024-*.dat` |
+| HOLC 1938 Atlanta (Mapping Inequality) | https://dsl.richmond.edu/panorama/redlining/static/citiesData/GAAtlanta1938/geojson.json | `data/holc_atlanta_1938.geojson` |
 | LODES8 GA geography crosswalk | https://lehd.ces.census.gov/data/lodes/LODES8/ga/ga_xwalk.csv.gz | `data/ga_xwalk.csv.gz` |
 
 itsmarta.com rejects the default python-requests User-Agent (403); `fetch_data.py` sends a generic Mozilla-compatible one.
@@ -70,7 +73,10 @@ Caches live in `data/cache/` keyed by bbox; delete them (or pass `--rebuild`) af
 | `model.py` | assignment <-> mode-choice loop; baseline cached to `data/cache/baseline_*.pkl` |
 | `scenario.py` | `extend_line`: corridor geometry from OSM, through-running extension of a GTFS line, lane removal on `roadIds` |
 | `export.py` | display sample, trip paths/timestamps, roads/tracts/metrics, mock pass-through, pydantic validation |
-| `contract.py` | pydantic mirror of `src/lib/contract.ts` |
+| `equity.py` | tract polygons + ACS tenure/income/rent/burden + HOLC grade-D share per GA tract |
+| `costs.py` | streetcar per-mile cost benchmarks, annualisation, cost per new-rider trip |
+| `verdict.py` | five tests + grades, verdict label/headline/summary, who-pays items, tract and agent equity fields |
+| `contract.py` | pydantic mirror of `src/lib/contract.ts` (1.1.0) |
 | `validate_contract.mjs` | validates output with the real zod schema (uses the repo's `node_modules`) |
 | `main.py` | FastAPI app |
 | `run.py`, `sanity.py`, `smoke_test.py` | CLI, checks, API smoke test |
@@ -112,20 +118,69 @@ Every number below is a named constant in the file listed. **Placeholders are no
 | Display times | work arrival ~ Normal(8:20, 30 min), clipped 7:00-9:50; departure = arrival - baseline minutes | export | display only |
 | Agent home/work | a real LODES block point in the block group (flow-weighted) | export | real |
 | `earningsBand` | drawn from the OD pair's LODES SE01/02/03 counts | export | real |
-| `renter=false`, `hasCar=true`, `rentPressure=false`, `costShareUsdYr=0`, `displacementRisk="none"`, tract `redlined=false` | | export | **placeholders** (ACS / HOLC not wired) |
-| `supportScore` | tanh(-minutesDelta/5) - 0.3 if within 150 m of new track | export | assumption |
+| `hasCar=true`, `displacementRisk="none"` | | export | **placeholders** (see equity table below) |
+
 | `dailyTransitRiders` | transit commuters (persons) per weekday, not boardings | export | definition |
 
-**Copied from the frontend mock** (`public/scenarios/beltline-streetcar.json`) into every sim output:
-verdict headline/summary/grades/alternatives and the 3 tests the sim doesn't compute, impact tiles and
-calibration, whoPays items, claims, personas, lookahead. The sim overwrites: metrics, agents, roads,
-tracts, line, impact.modeSplit, impact.minutesSavedByEarnings, whoPays.approval, and the values of the
-`time_saved` and `new_riders` tests. `impact.notes` says this inside every file. Persona `agentId`s
-refer to mock agents and do not exist in sim output.
+### Verdict, grades, cost and equity (`verdict.py`, `costs.py`, `equity.py`)
 
+Grades come only from these thresholds (judgment calls unless a source is named). The baseline file has no
+plan, so its five tests are 0 and graded "fair" with sublabel "Baseline - no plan applied".
+
+| Test | Value | good | fair | poor | Constant(s) |
+|---|---|---|---|---|---|
+| `time_saved` | net commuter-hours/weekday, all modeled commuters | >= 500 | 0 to 500 | < 0 (any net loss) | `TIME_SAVED_GOOD_HRS`, `TIME_SAVED_FAIR_HRS` |
+| `new_riders` | commuters/day switching to transit (work trips only) | >= 3,000 | >= 1,000 | < 1,000 | `NEW_RIDERS_GOOD`, `NEW_RIDERS_FAIR` |
+| `cost_per_rider` | mid capital cost / (new riders x 2 trips x 250 days x 20 yrs) | < $6 | < $15 | >= $15 | `COST_PER_TRIP_*`; breakpoints borrowed from FTA CIG cost-effectiveness (FAST Act interim policy guidance, June 2016: High < $4, Med-High $4-5.99, Medium $6-9.99, Med-Low $10-14.99, Low >= $15). FTA's measure is annual capital + O&M per project trip, so this is a looser comparison |
+| `redlined_benefit_share` | share of positive time gains going to residents of redlined tracts | >= their share of modeled commuters | >= 0.5 x that share | below, or no gains at all | `REDLINED_FAIR_RATIO` |
+| `renters_rent_pressure` | renter households within 800 m of new stops in rent-pressure tracts | <= 250 | <= 1,000 | > 1,000 | `RENTERS_GOOD_MAX`, `RENTERS_FAIR_MAX` |
+
+**Verdict label rule:** `poor` if `time_saved` is poor, or if `new_riders` and `cost_per_rider` are both poor;
+`good` if >= 3 tests are good and none is poor; otherwise `mixed`. Headline and summary are fixed sentence
+templates filled with the numbers (including negative or negligible results) and state the work-trips-only limit.
+
+**Capital cost (ESTIMATE, `costs.py`)** - per-mile benchmarks, nominal year-of-expenditure dollars, no
+inflation adjustment, no operating cost. Range = lowest..highest benchmark; midpoint = median benchmark:
+
+| Project | Opened | Miles | Capital cost | $/mile | Source |
+|---|---|---|---|---|---|
+| Atlanta Streetcar loop | 2014 | 2.7 | ~$98M | $36.3M | City of Atlanta final cost as reported 2014-15 (Railway Technology; Wikipedia "Atlanta Streetcar"); nominal 2014 $ |
+| Tempe Streetcar | 2022 | 3.0 | $201.85M | $67.3M | FTA Small Starts project profile, rating Nov 2018 (transit.dot.gov `az-tempe-streetcar-ar20-profile.pdf`) |
+| Kansas City Streetcar Main Street Extension | 2025 | 3.5 | $351.71M | $100.5M | FTA FFGA project profile FY22 (transit.dot.gov `MO-Kansas-City-Streetcar-Main-St-Ext-Project-FFGA-Profile-FY22.pdf`) |
+
+Annualised straight-line over `ANNUALIZE_YEARS` = 20 (no discounting) and split over Fulton + DeKalb
+households (ACS 2024 B25003 occupied units: 462,481 + 287,239 = 749,720). Agents living in Fulton/DeKalb get
+the midpoint as `costShareUsdYr`; others 0.
+
+**Equity inputs (`equity.py`)** - ACS 2024 5-year from the Census table-based summary files (no API key; the
+Census API now requires one): B25003, B19013, B25064, B25070. Tract polygons: Census cartographic boundary
+2023 (1:500k), simplified 25 m. HOLC: Mapping Inequality, Atlanta 1938 GeoJSON (University of Richmond).
+
+| Rule | Value | Constant |
+|---|---|---|
+| Tract is "formerly redlined" | >= 50% of its area in HOLC grade-D polygons | `REDLINED_D_SHARE` |
+| Rent-pressure tract | renter share >= 0.5 AND median HH income < 80% of Atlanta MSA median ($89,724, ACS 2024; HUD "low income" convention) | `RENT_PRESSURE_RENTER_SHARE`, `RENT_PRESSURE_INCOME_RATIO` |
+| Rent-pressure zone | 800 m around NEW stops (gazetteer kinds other than existing streetcar/MARTA stops) | `RENT_PRESSURE_RADIUS_M` |
+| Noise / construction zone | 150 m around the new track | `NOISE_BUFFER_M` |
+| Households in a zone | tract households (or renters) x share of tract AREA inside the buffer (uniform-density proxy) | `equity.buffer_share` |
+| Agent `renter` | **sampled** from the home tract's renter share (seeded RNG), not observed | `export` |
+| Agent `stake.rentPressure` | sampled renter AND home in a rent-pressure tract AND within 800 m of a new stop | `verdict.agent_equity` |
+| `displacementRisk` | always `"none"` - **not modeled**; no defensible year-5/10 proxy yet | |
+| Who pays: slowed roads | roads whose per-trip delay grows >= 0.05 min (3 s) | `SLOWED_ROAD_MIN` |
+| Who pays: spillover roads | unedited roads whose peak v/c grows >= 0.05 | `SPILLOVER_VC_DELTA` |
+| Support score | tanh(-minutesDelta/5) - 0.3 if noise zone - 0.2 if rent-pressure renter | `export` |
+
+**Still copied from the frontend mock** (listed in every file's `mockSections` and `impact.notes`):
+`verdict.alternatives`, `impact.tiles`, `impact.calibration`, `claims`, `personas`, `lookahead`.
+Persona `agentId`s refer to mock agents and do not exist in sim output.
+
+**Transit service** - `public/scenarios/transit-service.sim.json`: weekday 07:00-09:00 trips and headways per
+GTFS route and per `network.json` line id (`transit.export_service`, written by `run.py baseline`). The
+Atlanta Streetcar's first weekday departures are about 08:17-08:33, then every ~15 min, so its 7-9 AM
+headway is 40-60 min.
 **TODOs (not done):** HPMS AADT background traffic; ACS B08301/B08302/B08141 + per-tract ASC; park-and-ride;
 buses slowed by road congestion; GTFS shapes for bus/rail display paths (now straight stop-to-stop);
-other edit types; HOLC/ACS equity fields; Xpress / Ride Gwinnett feeds.
+other edit types; operating cost; displacement look-ahead; Xpress / Ride Gwinnett feeds.
 
 ## Who is modeled (and what is estimated)
 
@@ -164,5 +219,7 @@ other edit types; HOLC/ACS equity fields; Xpress / Ride Gwinnett feeds.
 4. Grow the box (`WHATIF_BBOX`), re-run `fetch_data.py` + `run.py baseline --rebuild`; check run time.
 5. Compute the remaining verdict tests (cost per rider, redlined share) so less is copied from the mock.
 6. GTFS `shapes.txt` for transit display paths; `brt_lane` / `change_frequency` edits reuse `apply_extend_line` pieces.
+
+
 
 

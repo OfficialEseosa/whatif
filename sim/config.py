@@ -1,4 +1,4 @@
-"""Single source of truth for paths and study-area configuration.
+﻿"""Single source of truth for paths and study-area configuration.
 
 Change BBOX here (and only here) to grow/shrink the study area. The frontend
 mock uses the same box: lng -84.42..-84.33, lat 33.73..33.80.
@@ -39,6 +39,24 @@ LODES_OD_INDEX = "https://lehd.ces.census.gov/data/lodes/LODES8/ga/od/"
 LODES_XWALK_URL = "https://lehd.ces.census.gov/data/lodes/LODES8/ga/ga_xwalk.csv.gz"
 MARTA_GTFS_URL = "https://www.itsmarta.com/google_transit_feed/google_transit.zip"
 
+# Equity / cost inputs (verified 2026-11-13)
+TRACTS_URL = "https://www2.census.gov/geo/tiger/GENZ2023/shp/cb_2023_13_tract_500k.zip"
+TRACTS_FILE = DATA_DIR / "cb_2023_13_tract_500k.zip"
+HOLC_URL = "https://dsl.richmond.edu/panorama/redlining/static/citiesData/GAAtlanta1938/geojson.json"
+HOLC_FILE = DATA_DIR / "holc_atlanta_1938.geojson"
+ACS_YEAR = 2024
+ACS_TABLES = ["b25003", "b19013", "b25064", "b25070"]
+
+
+def acs_url(table: str) -> str:
+    return (f"https://www2.census.gov/programs-surveys/acs/summary_file/{ACS_YEAR}/table-based-SF/data/"
+            f"5YRData/acsdt5y{ACS_YEAR}-{table}.dat")
+
+
+def acs_file(table: str) -> Path:
+    return DATA_DIR / f"acsdt5y{ACS_YEAR}-{table}.dat"
+
+
 # Simulation clock: trip timestamps are seconds after 6:00 AM.
 SIM_START_HOUR = 6.0
 
@@ -47,3 +65,4 @@ def ensure_dirs() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     SCENARIO_OUT_DIR.mkdir(parents=True, exist_ok=True)
+

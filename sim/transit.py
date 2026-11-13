@@ -355,3 +355,74 @@ def patterns_on_paths(tg: TransitGraph, sk: TransitSkim, od: pd.DataFrame, patte
         keep = c >= 0
         idx, c, rr, ss = idx[keep], c[keep], rr[keep], ss[keep]
     return hit
+
+
+# ---- real service frequencies for the frontend's train animation -----------
+# network.json line ids -> GTFS route_short_name(s) serving that track (in the box).
+LINE_ROUTES = {
+    "marta_north": ["RED", "GOLD"], "marta_south": ["RED", "GOLD"],
+    "marta_east": ["BLUE", "GREEN"], "marta_west": ["BLUE", "GREEN"],
+    "marta_proctor_creek": ["GREEN"], "marta_east_west": ["BLUE"],
+    "atlanta_streetcar": ["ATLSC"],
+}
+
+
+def export_service(path=None) -> dict:
+    """Weekday trips per hour and headways per route and per network.json line id,
+    counted at each route's busiest in-box stop, from the MARTA GTFS."""
+    import json
+
+    path = path or (config.SCENARIO_OUT_DIR / "transit-service.sim.json")
+    z = zipfile.ZipFile(config.GTFS_FILE)
+    rd = lambda n, **k: pd.read_csv(z.open(n), dtype=str, **k)  # noqa: E731
+    routes = rd("routes.txt")
+    routes = routes[routes.route_type.isin(["0", "1"])].set_index("route_id")
+    cal = rd("calendar.txt")
+    weekday = set(cal.loc[(cal.monday == "1") & (cal.tuesday == "1") & (cal.wednesday == "1"), "service_id"])
+    trips = rd("trips.txt")
+    trips = trips[trips.service_id.isin(weekday) & trips.route_id.isin(routes.index)]
+    st = rd("stop_times.txt", usecols=["trip_id", "departure_time", "stop_id"])
+    st = st[st.trip_id.isin(set(trips.trip_id))].merge(trips[["trip_id", "route_id", "direction_id"]], on="trip_id")
+    st["t"] = st.departure_time.map(_hms)
+    stops = rd("stops.txt").set_index("stop_id")
+    w, s, e, n = config.BBOX
+    lng, lat = stops.stop_lon.astype(float), stops.stop_lat.astype(float)
+    inbox = set(stops.index[(lng >= w) & (lng <= e) & (lat >= s) & (lat <= n)])
+    out_routes = {}
+    for rid, g in st.groupby("route_id"):
+        name = routes.loc[rid, "route_short_name"]
+        gi = g[g.stop_id.isin(inbox)]
+        dirs, refs = {}, []
+        for d, gdd in gi.groupby("direction_id"):
+            ref = gdd.stop_id.value_counts().index[0]  # busiest in-box stop (platform) in this direction
+            refs.append(stops.loc[ref, "stop_name"])
+            times = np.sort(gdd[gdd.stop_id == ref].t.values)
+            pk = times[(times >= 7 * 3600) & (times < 9 * 3600)]
+            dirs[d] = {"tripsAm7to9": int(len(pk)),
+                       "headwayMin7to9": round(120 / len(pk), 1) if len(pk) else None,
+                       "medianGapMin": round(float(np.median(np.diff(times)) / 60), 1) if len(times) > 1 else None,
+                       "firstDeparture": f"{times[0] // 3600:02d}:{times[0] % 3600 // 60:02d}",
+                       "lastDeparture": f"{times[-1] // 3600 % 24:02d}:{times[-1] % 3600 // 60:02d}"}
+        out_routes[name] = {"routeId": rid, "referenceStops": refs, "byDirection": dirs}
+    lines = {}
+    for lid, names in LINE_ROUTES.items():
+        per_dir = []
+        for d in ("0", "1"):
+            k = sum(out_routes[nm]["byDirection"].get(d, {}).get("tripsAm7to9", 0) for nm in names if nm in out_routes)
+            per_dir.append(k)
+        k = max(per_dir)
+        lines[lid] = {"routes": names, "tripsPerDirectionAm7to9": per_dir,
+                      "headwayMin": round(120 / k, 1) if k else None}
+    sc = out_routes.get("ATLSC", {}).get("byDirection", {})
+    lines["atlanta_streetcar"]["note"] = (
+        "Weekday GTFS: first streetcar departure at the reference stop is " +
+        ", ".join(f"{v['firstDeparture']} (dir {d})" for d, v in sc.items()) +
+        "; median gap between departures " + ", ".join(f"{v['medianGapMin']} min" for v in sc.values()) +
+        ". The 7-9 AM headway is long because service starts mid-morning.")
+    doc = {"source": f"MARTA GTFS ({config.MARTA_GTFS_URL}), weekday service", "window": "07:00-09:00",
+           "lines": lines, "routes": out_routes,
+           "note": "headwayMin = 120 min / max trips in one direction 07:00-09:00, all routes on that track combined."}
+    path.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    print(f"transit service -> {path}")
+    return doc
+

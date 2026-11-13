@@ -276,7 +276,8 @@ def run_scenario(edit: dict, scen_id: str, title: str | None = None, n_sample=ex
     riders_new = float((base.dem.od.jobs.values * run.p_transit * rides_new).sum())
     edit_out = copy.deepcopy(edit)
     edit_out["assumptions"] = list(edit.get("assumptions") or []) + notes
-    res = export.build_result(scen_id, title or edit["name"], edit_out, base, run, line, n_sample=n_sample)
+    res = export.build_result(scen_id, title or edit["name"], edit_out, base, run, line, n_sample=n_sample,
+                              riders_on_line=riders_new)
     res["impact"]["notes"].append(
         f"Commuters whose transit path rides the new/extended line: {riders_new:,.0f}/day "
         f"(of {res['metrics']['proposed']['dailyTransitRiders']:,.0f} transit + park-and-ride commuters working in the box).")
@@ -311,4 +312,5 @@ def run_beltline(n_sample=export.DISPLAY_SAMPLE_SIZE):
     res = run_scenario(edit, BELTLINE_STREETCAR_ID, n_sample=n_sample)
     res.pop("_timings", None)
     return export.write_result(res, BELTLINE_STREETCAR_ID)
+
 

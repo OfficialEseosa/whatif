@@ -286,12 +286,20 @@ def load_mock():
 
 
 def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=DISPLAY_SAMPLE_SIZE,
-                 seed=SEED) -> dict:
+                 seed=SEED, riders_on_line: float = 0.0) -> dict:
     net, dem, brun = base.net, base.dem, base.run
     prun = prop_run or brun
     line = line or {"path": [], "stops": []}
     s = draw_sample(dem, n_sample, seed)
     noise = _near_line(s.home, line["path"], NOISE_BUFFER_M)
+
+    import verdict as vd
+
+    mb = metrics(dem, brun, n_sample)
+    mp = metrics(dem, prun, n_sample)
+    roads = road_effects(net, brun, prop_run)
+    A = vd.assess(base, prop_run, edit, line, riders_on_line, mb, mp, roads)
+    eq_rng = np.random.default_rng(seed + 1)  # separate stream: renter sampling
 
     agents = []
     for i in range(n_sample):
@@ -308,37 +316,33 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
                 tr = drive_trip(net, run, pi, s.home[i], s.work[i], s.depart[i])
             trips.append(tr)
         delta = trips[1]["minutes"] - trips[0]["minutes"]
-        # ASSUMPTION: support ~ tanh(minutes saved / 5), minus 0.3 inside the noise zone.
-        support = float(np.clip(np.tanh(-delta / 5.0) - (0.3 if noise[i] else 0.0), -1, 1))
+        tract_id = str(dem.od.home_tract.values[pi])  # inbound: home tract outside the box
+        renter, pressure, cost_share = vd.agent_equity(A["ctx"], tract_id, s.home[i], eq_rng)
+        # ASSUMPTION: support ~ tanh(minutes saved / 5), minus 0.3 inside the noise zone,
+        # minus 0.2 for renters in the rent-pressure zone.
+        support = float(np.clip(np.tanh(-delta / 5.0) - (0.3 if noise[i] else 0.0) - (0.2 if pressure else 0.0), -1, 1))
         agents.append({
             "id": f"a{i:05d}", "home": [round(s.home[i][0], 5), round(s.home[i][1], 5)],
             "work": [round(s.work[i][0], 5), round(s.work[i][1], 5)],
-            "tractId": str(dem.od.home_tract.values[pi]),  # inbound: home tract outside the box
+            "tractId": tract_id,
             "earningsBand": s.band[i],
-            "renter": False,   # PLACEHOLDER until ACS B25003 is wired
+            "renter": renter,  # SAMPLED from the home tract's ACS renter share (seeded), not observed
             "hasCar": True,    # PLACEHOLDER: mode choice assumes car access (ACS B08141 TODO)
             "baseline": trips[0], "proposed": trips[1],
-            "stake": {"minutesDelta": round(delta, 1), "rentPressure": False, "noiseZone": bool(noise[i]),
-                      "costShareUsdYr": 0.0, "supportScore": round(support, 3)},
-            "displacementRisk": "none",
+            "stake": {"minutesDelta": round(delta, 1), "rentPressure": pressure, "noiseZone": bool(noise[i]),
+                      "costShareUsdYr": cost_share, "supportScore": round(support, 3)},
+            "displacementRisk": "none",  # NOT MODELED (no defensible year-5/10 proxy yet)
         })
 
-    mb = metrics(dem, brun, n_sample)
-    mp = metrics(dem, prun, n_sample)
     mock, from_mock = load_mock()
     jobs = dem.od.jobs.values
     saved_min = brun.expected_min() - prun.expected_min()
 
-    verdict = copy.deepcopy(mock["verdict"])
-    for t in verdict["tests"]:
-        if t["key"] == "time_saved":
-            t["value"] = round(float((saved_min * jobs).sum() / 60.0), 1)
-            t["unit"] = "hrs/day"
-        elif t["key"] == "new_riders":
-            t["value"] = round(mp["dailyTransitRiders"] - mb["dailyTransitRiders"], 1)
-            t["unit"] = "riders/day"
+    verdict = {"label": A["label"], "headline": A["headline"], "summary": A["summary"], "tests": A["tests"],
+               "alternatives": copy.deepcopy(mock["verdict"].get("alternatives", []))}
 
     impact = copy.deepcopy(mock["impact"])
+
     def split(run):
         p = run.p_transit
         pnr = run.tsk.pnr if run.tsk.pnr is not None else np.zeros(len(p), bool)
@@ -357,32 +361,35 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
     impact["minutesSavedByEarnings"] = bands
     copied = "copied from the frontend mock" if from_mock else "sim placeholders (no mock file found)"
     impact["notes"] = [
-        "Sim-computed: metrics, agents, roads, tracts, line, impact.modeSplit, impact.minutesSavedByEarnings, "
-        "whoPays.approval, verdict tests time_saved and new_riders (values only).",
-        f"Not computed by the sim ({copied}): verdict headline/summary/grades/alternatives, other verdict tests, "
-        "impact.tiles, impact.calibration, whoPays.items, claims, personas, lookahead.",
+        "Sim-computed: metrics, agents, roads, tracts (real polygons + ACS/HOLC equity fields), line, "
+        "impact.modeSplit, impact.minutesSavedByEarnings, verdict label/headline/summary/grades and all five tests, "
+        "whoPays.items and whoPays.approval.",
+        f"Not computed by the sim ({copied}): verdict.alternatives, impact.tiles, impact.calibration, claims, "
+        "personas, lookahead.",
         "Background road traffic is a PLACEHOLDER fraction of capacity (HPMS not wired), lowered now that "
         "inbound commuters are modeled.",
         "Inbound commuters (home outside the box): only the in-box part of their trip is routed on the network; "
         "the approach outside the box (drive to a gateway, or walk/drive to a MARTA station) is an ESTIMATE "
         "added to their minutes. Their drawn paths start where they enter the box. Outbound commuters are not modeled.",
-        "Mode choice: one global constant calibrated to a PLACEHOLDER 12% transit share (ACS not wired).",
-    ]
+        "Mode choice: one global constant calibrated to a PLACEHOLDER 12% transit share (ACS mode share not wired).",
+    ] + A["notes"]
 
-    who = copy.deepcopy(mock["whoPays"])
     sup = np.array([a["stake"]["supportScore"] for a in agents])
-    who["approval"] = {"support": round(float((sup > 0.1).mean()), 3), "oppose": round(float((sup < -0.1).mean()), 3),
-                       "basis": int(len(sup)),
-                       "note": "From display-sample stake scores (minutes delta + noise zone only; rent/cost not yet modeled)."}
+    who = {"items": A["items"],
+           "approval": {"support": round(float((sup > 0.1).mean()), 3), "oppose": round(float((sup < -0.1).mean()), 3),
+                        "basis": int(len(sup)),
+                        "note": "From display-sample stake scores: minutes delta, noise zone, and rent-pressure "
+                                "exposure of sampled renters (cost share not yet in the score)."}}
 
     res = {
-        "id": scen_id, "contractVersion": CONTRACT_VERSION, "title": title, "edit": edit, "isMock": False,
+        "id": scen_id, "source": "prebaked_sim", "contractVersion": CONTRACT_VERSION, "title": title, "edit": edit,
+        "isMock": False, "mockSections": MOCK_SECTIONS,
         "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "timeWindow": {"startSec": 0, "endSec": 14400},
         "line": line, "networkUrl": NETWORK_URL,
         "metrics": {"baseline": mb, "proposed": mp},
         "verdict": verdict, "impact": impact, "agents": agents,
-        "roads": road_effects(net, brun, prop_run), "tracts": tract_effects(dem, brun, prop_run),
+        "roads": roads, "tracts": A["tracts"],
         "whoPays": who, "claims": copy.deepcopy(mock.get("claims", [])),
         "personas": copy.deepcopy(mock.get("personas", [])),
         "lookahead": copy.deepcopy(mock["lookahead"]),
@@ -391,12 +398,16 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
     return res
 
 
+# Sections still copied from the frontend mock (contract MOCK_SECTION_KEYS).
+MOCK_SECTIONS = ["verdict.alternatives", "impact.tiles", "impact.calibration", "claims", "personas", "lookahead"]
+
 def write_result(res: dict, name: str | None = None):
     config.ensure_dirs()
     path = config.SCENARIO_OUT_DIR / f"{name or res['id']}.sim.json"
     path.write_text(json.dumps(res, separators=(",", ":")), encoding="utf-8")
     print(f"wrote {path} ({path.stat().st_size/1e6:.2f} MB, {len(res['agents'])} agents)")
     return path
+
 
 
 
