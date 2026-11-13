@@ -1,0 +1,12 @@
+fastapi==0.162.6
+uvicorn[standard]==0.54.0
+osmnx==2.1.1
+networkx==3.7
+scipy==1.18.1
+numpy==2.5.4
+pandas==3.1.1
+pydantic==2.14.3
+geopandas==1.2.0
+shapely==2.2.0
+pyproj==3.8.0
+requests==2.34.2
