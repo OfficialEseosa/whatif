@@ -1,0 +1,18 @@
+# Files not uploaded by `vercel deploy` (the Next.js app needs none of these)
+
+# Python simulation (not deployed; /api/simulate serves public/scenarios/*.json)
+/sim
+
+# Script data (OSM snapshot used by npm run mock / fetch:osm)
+/scripts/data
+
+# Local env, build output, deps, editor/agent folders
+.env
+.env*.local
+/.next
+/node_modules
+/.claude
+*.tsbuildinfo
+__pycache__/
+*.pyc
+.venv/

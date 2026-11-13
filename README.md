@@ -17,6 +17,12 @@ npm run check:api    # with the app running: validates all API routes against th
 
 Node 22.18+ is required (the scripts import `src/lib/contract.ts` directly via Node's type stripping).
 
+## Deploy
+
+Vercel project `whatif-atl` (scope `raphael-omoroses-projects`), connected to this GitHub repo: every push to `main` deploys to production, other branches get preview URLs. Manual redeploy from a linked checkout: `vercel deploy --prod`.
+
+Only `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is set on Vercel (Production and Preview); `ANTHROPIC_API_KEY` and `SIM_URL` are not, so the Claude routes return canned output and `/api/simulate` serves the prebaked files in `public/scenarios/`. `sim/` is not deployed (`.vercelignore`).
+
 ## Environment
 
 Copy `.env.local.example` to `.env.local` (gitignored). All optional:
