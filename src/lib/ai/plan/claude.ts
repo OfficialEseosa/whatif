@@ -116,7 +116,9 @@ export async function readPlanWithClaude(req: PlanRequest): Promise<PlanHints | 
     }
     const h = parsed.data;
     // A proposed line run more often is still that proposed line, not a change to an existing one.
-    const keepsType = h.type === "change_frequency" && prev && prev.type !== "change_frequency" && !prev.baseLineId;
+    // Naming an existing line ("run the Red Line every 5 minutes") is a new plan about that line.
+    const aboutPrevious = !!h.changesPrevious || !h.baseLineId;
+    const keepsType = h.type === "change_frequency" && prev && prev.type !== "change_frequency" && !prev.baseLineId && aboutPrevious;
     let type = keepsType ? prev.type : h.type;
     // The vehicle decides between the three "new line" types when the two disagree.
     if (type === "brt_lane" || type === "new_bus_route" || type === "new_rail_line") {
