@@ -1,4 +1,4 @@
-# WhatIf ATL — simulation backend (`sim/`)
+﻿# WhatIf ATL â€” simulation backend (`sim/`)
 
 Thin, end-to-end slice: real OSM roads, real MARTA GTFS, real LODES commuters ->
 BPR/MSA traffic assignment + frequency-based transit + logit mode choice ->
@@ -49,10 +49,10 @@ Caches live in `data/cache/` keyed by bbox; delete them (or pass `--rebuild`) af
 .\.venv\Scripts\python.exe smoke_test.py http://127.0.0.1:8000
 ```
 
-- `GET /health` — status, bbox, prebaked files, population.
-- `POST /simulate` with `{ "edit": ScenarioEdit }` — returns a prebaked `public/scenarios/*.sim.json`
+- `GET /health` â€” status, bbox, prebaked files, population.
+- `POST /simulate` with `{ "edit": ScenarioEdit }` â€” returns a prebaked `public/scenarios/*.sim.json`
   when its edit matches (ignoring `name`/`assumptions`; header `X-Sim-Source: prebaked`), else runs
-  live on the in-memory baseline (~5 s, 2000-agent sample; `X-Sim-Source: live`).
+  live on the in-memory baseline (~13 s, 2000-agent sample; `X-Sim-Source: live`).
   Only `extend_line` / `new_rail_line` are implemented; other types return 501.
 - CORS open for `http://localhost:*` and `http://127.0.0.1:*`.
 
@@ -62,10 +62,10 @@ Caches live in `data/cache/` keyed by bbox; delete them (or pass `--rebuild`) af
 |---|---|
 | `config.py` | `BBOX` (single value; env `WHATIF_BBOX` overrides), paths, URLs |
 | `fetch_data.py` | downloads all inputs |
-| `network.py` | OSM graph -> edge table (length, free-flow time, lanes, capacity, way ids), stable edge ids `<u>-<v>-<key>`; road ids for the contract are OSM way ids `w<id>` |
-| `demand.py` | LODES flows with home AND work in the box -> block-group pairs (jobs + earnings bands), snapped to network nodes |
-| `assign.py` | BPR + 4-iteration MSA; `scipy.sparse.csgraph.dijkstra` from all origins, vectorised predecessor-walk loading |
-| `transit.py` | GTFS -> peak patterns (headway from 7-9 AM trip counts, in-vehicle times from schedule) -> layered frequency graph |
+| `network.py` | boundary gateways; OSM graph -> edge table (length, free-flow time, lanes, capacity, way ids), stable edge ids `<u>-<v>-<key>`; road ids for the contract are OSM way ids `w<id>` |
+| `demand.py` | LODES internal flows (home and work in box) -> block-group pairs; inbound flows (home outside, work inside) -> home tract -> work BG; zones snapped to network nodes |
+| `assign.py` | BPR + 12-iteration MSA; `scipy.sparse.csgraph.dijkstra` from all origins and gateways, vectorised predecessor-walk loading; inbound gateway choice |
+| `transit.py` | GTFS -> peak patterns (headway from 7-9 AM trip counts, in-vehicle times from schedule; rail kept region-wide) -> layered frequency graph; inbound rail access |
 | `mode_choice.py` | binary logit drive vs transit, one global ASC calibrated on the baseline |
 | `model.py` | assignment <-> mode-choice loop; baseline cached to `data/cache/baseline_*.pkl` |
 | `scenario.py` | `extend_line`: corridor geometry from OSM, through-running extension of a GTFS line, lane removal on `roadIds` |
@@ -83,12 +83,21 @@ Every number below is a named constant in the file listed. **Placeholders are no
 |---|---|---|---|
 | `BBOX` | -84.42,33.73,-84.33,33.80 | config | choice (same as frontend mock) |
 | `PEAK_HOUR_SHARE` | 0.25 | demand | **placeholder** for ACS B08302 departure share |
+| No work-from-home / absence reduction (LODES JT00 counts jobs) | | demand | simplification: peak volumes likely overstated |
+| `MAX_INBOUND_HOME_KM` | 80 km (drops 24,039 of 271,316 inbound) | demand | assumption |
+| Inbound home point | job-weighted mean of LODES home blocks per home tract | demand | real (aggregated) |
+| Gateways | 25 boundary crossings of motorway/trunk/primary/secondary roads (`network.find_gateways`) | network | from OSM |
+| `OUT_OF_BOX_DETOUR`, `OUT_OF_BOX_SPEED_KPH` | 1.25; 50 motorway / 38 trunk / 33 primary / 30 secondary km/h | assign | **estimate** of the out-of-box drive |
+| `APPROACH_REF_MIN` | 10 min x BPR term of the gateway edge | assign | assumption (queue on the approach) |
+| `MSA_ITERATIONS` | 12 (rel. gap ~1%) | assign | choice |
+| Zone connectors | zones snap to the nearest tertiary-or-higher node | demand | simplification |
+| `STATION_CANDIDATES`, `PNR_DRIVE_KPH`, `PNR_DETOUR`, `PNR_PENALTY_MIN`, `PNR_MAX_KM` | 6, 35 km/h, 1.3, 5 min, 25 km | transit | **estimate** of inbound access to MARTA rail |
 | Intrazonal flows (same block group / same node) | dropped from assignment | demand | simplification (913 jobs) |
 | `CAPACITY_PER_LANE` by class | 450-1900 veh/h/lane | network | assumption |
 | `DEFAULT_LANES`, `DEFAULT_SPEED_KPH` | by class, when OSM tags missing | network | assumption |
 | `SIGNAL_DELAY_S` / `INTERSECTION_DELAY_S` | 15 s / 4 s per edge end | network | **placeholder** for signal timing |
 | `BPR_ALPHA`, `BPR_BETA` | 0.15, 4 | assign | standard |
-| `BACKGROUND_VC_PLACEHOLDER` | 0.05-0.85 of capacity by class | assign | **placeholder** for HPMS AADT x K x D minus commuters |
+| `BACKGROUND_VC_PLACEHOLDER` | 0.55 motorway ... 0.05 residential (lowered once inbound trips were modeled) | assign | **placeholder** for HPMS AADT x K x D minus commuters |
 | `VEHICLE_OCCUPANCY` | 1.08 | assign | assumption |
 | `DRIVE_TERMINAL_MIN` | 4 min per trip (park + walk) | assign | assumption |
 | `WALK_SPEED_KPH`, `WALK_CIRCUITY` | 4.8, 1.3 | transit | assumption |
@@ -96,11 +105,11 @@ Every number below is a named constant in the file listed. **Placeholders are no
 | `TRANSFER_PENALTY_MIN` | 5 min (counted in minutes too) | transit | assumption |
 | Headway | 120 min / trips in 7-9 AM (trip's middle in-box stop) | transit | from GTFS |
 | `BETA_TIME` | 0.08 / min | mode_choice | assumption |
-| `TARGET_TRANSIT_SHARE` | 0.12 | mode_choice | **placeholder** for ACS B08301 |
-| All commuters have a car; no park-and-ride; no walk/bike mode | | mode_choice | simplification |
+| `TARGET_TRANSIT_SHARE` | 0.12 (transit + park-and-ride, whole modeled population) | mode_choice | **placeholder** for ACS B08301 |
+| All commuters have a car; no walk/bike mode; no bus feeders to rail | | mode_choice | simplification |
 | `SPEED_MIXED_TRAFFIC_KPH` / `SPEED_OWN_ROW_KPH` (streetcar) | 12 / 20 km/h | scenario | assumption |
 | `SHARED_LANE_CAPACITY_FACTOR` | 0.7 when a 1-lane road "loses" a lane | scenario | assumption |
-| Display departures | Normal(7:30, 30 min), clipped 6:15-9:30 | export | display only |
+| Display times | work arrival ~ Normal(8:20, 30 min), clipped 7:00-9:50; departure = arrival - baseline minutes | export | display only |
 | Agent home/work | a real LODES block point in the block group (flow-weighted) | export | real |
 | `earningsBand` | drawn from the OD pair's LODES SE01/02/03 counts | export | real |
 | `renter=false`, `hasCar=true`, `rentPressure=false`, `costShareUsdYr=0`, `displacementRisk="none"`, tract `redlined=false` | | export | **placeholders** (ACS / HOLC not wired) |
@@ -118,22 +127,42 @@ refer to mock agents and do not exist in sim output.
 buses slowed by road congestion; GTFS shapes for bus/rail display paths (now straight stop-to-stop);
 other edit types; HOLC/ACS equity fields; Xpress / Ride Gwinnett feeds.
 
+## Who is modeled (and what is estimated)
+
+- **Internal commuters** (live and work in the box, 25,717 in LODES 2024): whole trip routed on the network.
+- **Inbound commuters** (work in the box, home outside within 80 km, 247,277): **only the in-box part is
+  modeled on the network.** The approach outside the box is an estimate added to their minutes:
+  - drive: straight line home -> gateway x 1.25 at a class speed, plus a queue term on the gateway road;
+    the gateway is re-chosen every MSA iteration (min of approach estimate + congested in-box time);
+  - transit: walk (<= 1 km) or drive (park-and-ride, <= 25 km, +5 min) to one of the 6 nearest MARTA rail
+    platforms (estimate), then the real GTFS rail schedule, transfers and in-box egress (modeled).
+  - Their display paths start where they enter the box (gateway node or first in-box rail stop).
+- **Not modeled:** outbound commuters (live in box, work outside: ~58k), buses entering the box from
+  outside, bus feeders to rail, station parking capacity, work-from-home.
+- `populationModeled` = 272,994 = internal + inbound (intrazonal 922 and far-away 24,039 excluded).
+
 ## Honest limits of the current numbers
 
-- **Only commuters who live AND work in the box (25,726 in 2024 LODES).** ~298k people work in the box
-  but most live outside it. Box size vs. in-box commuters (`demand.py --sizes`):
-  8x8 km (current) 26.6k · 11x11 km 46k · 15x15 km 72k · 18x18 km 110k · 24x24 km 187k ·
-  30x30 km 285k · 37x37 km 460k. The plan's "quarter million" needs roughly a 28x28 km box.
-- In-box commuter cars are ~3% of modeled motorway volume; road congestion is almost entirely the
-  placeholder background, so peak drive times are close to free-flow (+signal delay).
-- The streetcar extension effect is small at this scale (~250 in-box commuters ride the new line).
-
+- Freeway gateways take most inbound cars (I-85 N ~17.7k veh/h, Connector S ~9k, I-20 E/W 6-7k);
+  arterial gateways 100-1,700 veh/h each. Downtown Connector v/c median 1.05, max 1.45 (6 edges > 1.3);
+  59 edges > 1.3 overall, mostly freeway ramps and the tertiary/secondary streets they feed
+  (Techwood Dr, Williams St, Broad St, Coca-Cola Pl, up to 2.3). No work-from-home reduction is applied,
+  so peak volumes are likely overstated.
+- In-box drive time, job-weighted: free-flow 5.6 min vs peak 7.1 min (x1.28); inbound x1.30, internal x1.11.
+  Intown point-to-point trips on streets the inbound flow does not use barely change (Five Points -> PCM 9.5 -> 9.9).
+- Mode split is calibrated to a placeholder 12% total; it comes out as 1.1% walk-access transit and 10.9%
+  park-and-ride, because inbound riders mostly drive to stations (bus feeders are not modeled).
+  28% of OD units have no transit option (home > 25 km from rail).
+- The streetcar extension effect is small (~240 commuters per day ride the new line).
+- Box size vs commuters with home AND work inside (`demand.py --sizes`): 8x8 km 26.6k, 11x11 km 46k,
+  15x15 km 72k, 18x18 km 110k, 24x24 km 187k, 30x30 km 285k, 37x37 km 460k.
 ## What Raphael should do next (in order)
 
-1. **Add inbound commuters** (work in box, live outside): route them from the box-boundary node nearest
-   their home direction (or a park-and-ride station). This is the biggest realism gain (10x population).
-2. **Replace background traffic** with HPMS AADT x 0.09 x 0.55 minus modeled commuters (`assign.background_volume`).
-3. **ACS B08301 per-tract ASC** in `mode_choice` (and B08302 for `PEAK_HOUR_SHARE`); then fill `renter`/`rentPressure`.
-4. Grow the box once (1) is in (`WHATIF_BBOX`), re-run `fetch_data.py` + `run.py baseline --rebuild`; check run time.
+1. **Replace background traffic** with HPMS AADT x 0.09 x 0.55 minus modeled commuters (`assign.background_volume`).
+2. **ACS B08301 per-tract ASC** (and the work-from-home share) in `mode_choice` (and B08302 for `PEAK_HOUR_SHARE`); then fill `renter`/`rentPressure`.
+3. Add outbound commuters (reverse of the gateway logic) and bus feeders / buses entering the box.
+4. Grow the box (`WHATIF_BBOX`), re-run `fetch_data.py` + `run.py baseline --rebuild`; check run time.
 5. Compute the remaining verdict tests (cost per rider, redlined share) so less is copied from the mock.
 6. GTFS `shapes.txt` for transit display paths; `brt_lane` / `change_frequency` edits reuse `apply_extend_line` pieces.
+
+

@@ -1,4 +1,4 @@
-"""Apply a ScenarioEdit to the cached baseline and rerun only what changed.
+﻿"""Apply a ScenarioEdit to the cached baseline and rerun only what changed.
 
 Implemented edit types: extend_line (also used as a generic "new line" when the
 base line is not found). Others raise NotImplementedError (TODO).
@@ -279,7 +279,7 @@ def run_scenario(edit: dict, scen_id: str, title: str | None = None, n_sample=ex
     res = export.build_result(scen_id, title or edit["name"], edit_out, base, run, line, n_sample=n_sample)
     res["impact"]["notes"].append(
         f"Commuters whose transit path rides the new/extended line: {riders_new:,.0f}/day "
-        f"(of {res['metrics']['proposed']['dailyTransitRiders']:,.0f} transit commuters; in-box LODES flows only).")
+        f"(of {res['metrics']['proposed']['dailyTransitRiders']:,.0f} transit + park-and-ride commuters working in the box).")
     if verbose:
         mb, mp = res["metrics"]["baseline"], res["metrics"]["proposed"]
         print(f"scenario {scen_id}: transit share {mb['transitShare']:.3f} -> {mp['transitShare']:.3f}, "
@@ -311,3 +311,4 @@ def run_beltline(n_sample=export.DISPLAY_SAMPLE_SIZE):
     res = run_scenario(edit, BELTLINE_STREETCAR_ID, n_sample=n_sample)
     res.pop("_timings", None)
     return export.write_result(res, BELTLINE_STREETCAR_ID)
+

@@ -70,7 +70,7 @@ class Pattern:
 
 @dataclass
 class TransitData:
-    stops: pd.DataFrame                       # stop_id (str), name, lng, lat
+    stops: pd.DataFrame                       # stop_id (str), name, lng, lat (rail stations box-wide + region)
     patterns: list = field(default_factory=list)
 
 
@@ -95,7 +95,11 @@ def load_gtfs() -> TransitData:
         keep_r = routes.index[routes.route_type != "3"]
         trips = trips[trips.route_id.isin(keep_r)]
     st = rd("stop_times.txt", usecols=["trip_id", "arrival_time", "departure_time", "stop_id", "stop_sequence"])
-    st = st[st.trip_id.isin(set(trips.trip_id)) & st.stop_id.isin(inbox_ids)].copy()
+    st = st[st.trip_id.isin(set(trips.trip_id))]
+    # Rail patterns are kept at full length (stations outside the box too) so inbound
+    # commuters can board MARTA rail outside the box and ride the real schedule in.
+    rail_trips = set(trips.trip_id[trips.route_id.isin(routes.index[routes.route_type.isin(["1", "2"])])])
+    st = st[st.stop_id.isin(inbox_ids) | st.trip_id.isin(rail_trips)].copy()
     st["seq"] = st.stop_sequence.astype(int)
     st["t"] = st.departure_time.map(_hms)
     st = st.sort_values(["trip_id", "seq"])
@@ -141,7 +145,7 @@ def load_gtfs() -> TransitData:
                 color=str(rt.get("route_color", "")),
             ))
     used = {s for p in patterns for s in p.stop_ids}
-    out_stops = inbox[inbox.stop_id.isin(used)][["stop_id", "stop_name", "lng", "lat"]].rename(
+    out_stops = stops[stops.stop_id.isin(used)][["stop_id", "stop_name", "lng", "lat"]].rename(
         columns={"stop_name": "name"}).reset_index(drop=True)
     by_mode = Counter(p.mode for p in patterns)
     print(f"transit: {len(out_stops)} stops, {len(patterns)} peak patterns {dict(by_mode)} ({time.time()-t:.1f}s)")
@@ -168,6 +172,7 @@ class TransitGraph:
     rs_pattern: np.ndarray       # pattern index per RS node (-1 otherwise, full length)
     rs_pos: np.ndarray           # position of the RS node within its pattern (-1 otherwise)
     patterns: list
+    stop_index: dict = field(default_factory=dict)  # stop_id -> stop position
 
     def zo(self, z):
         return z
@@ -239,32 +244,87 @@ def build_graph(td: TransitData, zones: pd.DataFrame) -> TransitGraph:
     rsj = np.full(Nn, -1, dtype=np.int32)
     rsj[base_RS:] = rs_j
     return TransitGraph(csr=m, n_zones=Z, n_stops=S, node_xy=node_xy, node_kind=kind,
-                        rs_pattern=rsp, rs_pos=rsj, patterns=td.patterns)
+                        rs_pattern=rsp, rs_pos=rsj, patterns=td.patterns, stop_index=sidx)
+
+
+# ---- inbound commuters (home outside the box) ------------------------------
+# They reach MARTA rail outside (or inside) the box on foot or by car, then ride
+# the GTFS schedule in. Access is ESTIMATED (straight line x detour); the rail ride,
+# transfers and in-box egress are modeled on the graph.
+STATION_CANDIDATES = 6            # nearest rail platforms considered per home
+PNR_DRIVE_KPH = 35.0              # ASSUMPTION: drive-to-station speed
+PNR_DETOUR = 1.3
+PNR_PENALTY_MIN = 5.0             # ASSUMPTION: park + walk to platform
+PNR_MAX_KM = 25.0                 # beyond this nobody drives to a station
+# TODO: bus feeders to rail, buses entering the box, parking capacity by station.
 
 
 @dataclass
 class TransitSkim:
-    minutes: np.ndarray          # per OD pair (inf if unreachable)
-    dist: np.ndarray             # (Z, Nn) seconds from each origin zone
+    minutes: np.ndarray          # per OD unit (inf if unreachable)
+    dist: np.ndarray             # (R, Nn) seconds from each source row
     pred: np.ndarray
     seconds: float
+    src_node: np.ndarray = None  # graph node per source row (Zo zones, then rail A-nodes)
+    row: np.ndarray = None       # source row per OD unit
+    access_min: np.ndarray = None  # estimated out-of-graph access minutes per OD unit
+    pnr: np.ndarray = None       # True if access is by car (park-and-ride)
+
+
+def rail_stop_index(tg: TransitGraph) -> np.ndarray:
+    idx = sorted({tg.stop_index[s] for p in tg.patterns if p.mode == "rail" for s in p.stop_ids})
+    return np.array(idx, dtype=np.int64)
 
 
 def skim(tg: TransitGraph, od: pd.DataFrame) -> TransitSkim:
     t = time.time()
-    dist, pred = dijkstra(tg.csr, directed=True, indices=np.arange(tg.n_zones), return_predecessors=True)
-    mins = dist[od.o.values, tg.n_zones + od.d.values] / 60.0
-    return TransitSkim(minutes=mins, dist=dist, pred=pred, seconds=time.time() - t)
+    Z = tg.n_zones
+    base_A = 2 * Z
+    rail = rail_stop_index(tg)
+    src = np.r_[np.arange(Z), base_A + rail]
+    dist, pred = dijkstra(tg.csr, directed=True, indices=src, return_predecessors=True)
+    ext = od.ext.values
+    n = len(od)
+    mins = np.full(n, np.inf)
+    row = np.zeros(n, dtype=np.int64)
+    access = np.zeros(n)
+    pnr = np.zeros(n, bool)
+    io = od.o.values[~ext]
+    row[~ext] = io
+    mins[~ext] = dist[io, Z + od.d.values[~ext]] / 60.0
+    if ext.any() and len(rail):
+        lat0 = float(np.mean(tg.node_xy[:Z, 1]))
+        rxy = _xy(tg.node_xy[base_A + rail, 0], tg.node_xy[base_A + rail, 1], lat0)
+        hxy = _xy(od.hlng.values[ext], od.hlat.values[ext], lat0)
+        k = min(STATION_CANDIDATES, len(rail))
+        dd, kk = cKDTree(rxy).query(hxy, k=k)
+        dd, kk = dd.reshape(len(hxy), k), kk.reshape(len(hxy), k)
+        walk = np.where(dd <= ACCESS_MAX_M, dd * WALK_CIRCUITY / (WALK_SPEED_KPH / 3.6), np.inf)
+        drive = np.where(dd <= PNR_MAX_KM * 1000, dd * PNR_DETOUR / (PNR_DRIVE_KPH / 3.6) + 60 * PNR_PENALTY_MIN, np.inf)
+        acc = np.minimum(walk, drive)
+        ride = dist[Z + kk, (Z + od.d.values[ext])[:, None]]
+        tot = acc + ride
+        j = np.argmin(tot, axis=1)
+        a = np.arange(len(j))
+        mins[ext] = tot[a, j] / 60.0
+        row[ext] = Z + kk[a, j]
+        access[ext] = acc[a, j] / 60.0
+        pnr[ext] = drive[a, j] < walk[a, j]
+    return TransitSkim(minutes=mins, dist=dist, pred=pred, seconds=time.time() - t, src_node=src,
+                       row=row, access_min=access, pnr=pnr)
 
 
-def trace(tg: TransitGraph, sk: TransitSkim, o: int, d: int) -> list[int]:
+def trace(tg: TransitGraph, sk: TransitSkim, i: int, d: int) -> list[int]:
+    """Node path for OD unit i (source row sk.row[i]) to destination zone d."""
+    r = int(sk.row[i])
+    o = int(sk.src_node[r])
     target = tg.n_zones + d
-    if not np.isfinite(sk.dist[o, target]):
+    if not np.isfinite(sk.dist[r, target]):
         return []
     out = [target]
     cur = target
     while cur != o:
-        cur = sk.pred[o, cur]
+        cur = sk.pred[r, cur]
         if cur < 0:
             return []
         out.append(int(cur))
@@ -276,23 +336,22 @@ def patterns_used(tg: TransitGraph, nodes: list[int]) -> set[int]:
 
 
 def patterns_on_paths(tg: TransitGraph, sk: TransitSkim, od: pd.DataFrame, pattern_ids: set[int]) -> np.ndarray:
-    """Boolean per OD pair: does the transit path ride any pattern in pattern_ids?
+    """Boolean per OD unit: does its transit path ride any pattern in pattern_ids?
     Vectorised walk up the predecessor matrix."""
-    o = od.o.values.copy()
+    r = sk.row.copy()
+    src = sk.src_node[r]
     cur = tg.n_zones + od.d.values
     hit = np.zeros(len(od), bool)
-    alive = np.isfinite(sk.dist[o, cur])
+    alive = np.isfinite(sk.dist[r, cur])
     mask = np.zeros(tg.csr.shape[0], bool)
     for pi in pattern_ids:
         mask |= tg.rs_pattern == pi
     idx = np.where(alive)[0]
-    c = cur[idx]
-    oo = o[idx]
+    c, rr, ss = cur[idx], r[idx], src[idx]
     while len(idx):
         hit[idx] |= mask[c]
-        c = sk.pred[oo, c]
+        done = c == ss
+        c = np.where(done, -1, sk.pred[rr, c])
         keep = c >= 0
-        idx, c, oo = idx[keep], c[keep], oo[keep]
+        idx, c, rr, ss = idx[keep], c[keep], rr[keep], ss[keep]
     return hit
-
-

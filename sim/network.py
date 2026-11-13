@@ -95,6 +95,8 @@ class Network:
     edges: pd.DataFrame            # one row per directed edge
     edge_geoms: list               # list of [[lng,lat], ...] per edge row
     node_index: dict = field(default_factory=dict)
+    in_scc: np.ndarray | None = None    # node is in the largest strongly connected component
+    gateways: pd.DataFrame | None = None  # boundary entry nodes: node_idx, lng, lat, cls, name
 
     @property
     def n_nodes(self) -> int:
@@ -126,8 +128,13 @@ def build_network() -> Network:
     if not config.GRAPH_FILE.exists():
         raise FileNotFoundError(f"{config.GRAPH_FILE} missing - run fetch_data.py first")
     G = ox.load_graphml(config.GRAPH_FILE)
-    # Keep the largest strongly connected component so every OD is routable.
-    G = ox.truncate.largest_component(G, strongly=True)
+    # Keep the largest WEAKLY connected component: dangling inbound roads cut by the
+    # bbox (in-degree 0) are kept as gateway sources. Zones snap only to SCC nodes,
+    # so every zone-to-zone OD stays routable.
+    import networkx as nx
+
+    G = ox.truncate.largest_component(G, strongly=False)
+    scc = max(nx.strongly_connected_components(G), key=len)
 
     node_osm = np.array(list(G.nodes), dtype=np.int64)
     node_index = {int(n): i for i, n in enumerate(node_osm)}
@@ -171,8 +178,74 @@ def build_network() -> Network:
             geoms.append([[round(G.nodes[u]["x"], 6), round(G.nodes[u]["y"], 6)],
                           [round(G.nodes[v]["x"], 6), round(G.nodes[v]["y"], 6)]])
     edges = pd.DataFrame(rows)
-    return Network(node_osm=node_osm, node_xy=node_xy, edges=edges, edge_geoms=geoms,
-                   node_index=node_index)
+    in_scc = np.array([int(n) in scc for n in node_osm])
+    net = Network(node_osm=node_osm, node_xy=node_xy, edges=edges, edge_geoms=geoms,
+                  node_index=node_index, in_scc=in_scc)
+    net.gateways = find_gateways(net, G)
+    return net
+
+
+# Gateways: where major roads cross the study-box boundary. A candidate is a node
+# within GATEWAY_BOUNDARY_M of the bbox edge where a road of class GATEWAY_CLASSES
+# stops (only one major-road neighbour - the road was cut by the bbox), and from
+# which the network can be entered (it can reach the strongly connected core).
+# Candidates within GATEWAY_MERGE_M are merged, keeping the highest class.
+GATEWAY_CLASSES = ["motorway", "trunk", "primary", "secondary", "motorway_link", "trunk_link"]
+GATEWAY_BOUNDARY_M = 250.0
+GATEWAY_MERGE_M = 400.0
+GATEWAY_SOURCE_BOUNDARY_M = 600.0
+
+
+def find_gateways(net: "Network", G) -> pd.DataFrame:
+    w, s, e, n = config.BBOX
+    lat0 = np.cos(np.deg2rad((s + n) / 2))
+    x, y = net.node_xy[:, 0], net.node_xy[:, 1]
+    dist_edge = np.minimum.reduce([(x - w) * lat0, (e - x) * lat0, (y - s), (n - y)]) * 111_320
+    rank = {c: i for i, c in enumerate(GATEWAY_CLASSES)}
+    best = {}
+    for _, r in net.edges.iterrows():
+        cl = rank.get(r.highway)
+        if cl is None:
+            continue
+        for nd in (r.u_idx, r.v_idx):
+            if nd not in best or cl < best[nd][0]:
+                best[nd] = (cl, r.highway, r["name"])
+    import networkx as nx
+
+    major = set(GATEWAY_CLASSES) | {"tertiary", "primary_link", "secondary_link"}
+    core = int(net.node_osm[np.where(net.in_scc)[0][0]])
+    can_enter = nx.ancestors(G, core) | {core}
+    cands = []
+    for nd, (cl, hw, name) in best.items():
+        osm = int(net.node_osm[nd])
+        if osm not in can_enter:
+            continue
+        # One-way entry carriageways cut by the bbox have in-degree 0 (freeways):
+        # always gateways, with a wider boundary tolerance (freeway nodes are sparse).
+        if G.in_degree(osm) == 0 and dist_edge[nd] <= GATEWAY_SOURCE_BOUNDARY_M:
+            cands.append((cl, dist_edge[nd], nd, hw, name))
+            continue
+        if dist_edge[nd] > GATEWAY_BOUNDARY_M:
+            continue
+        # Same road (name or ref) continuing on only one side => the road was cut here.
+        def same(d):
+            return (str(_first(d.get("highway"))) in major and
+                    ((name and str(_first(d.get("name")) or "") == name) or
+                     (not name and str(_first(d.get("ref")) or "") != "")))
+        mnb = {v for _, v, d in G.out_edges(osm, data=True) if same(d)} | \
+              {u for u, _, d in G.in_edges(osm, data=True) if same(d)}
+        if len(mnb) == 1:
+            cands.append((cl, dist_edge[nd], nd, hw, name))
+    cands.sort()
+    keep = []
+    for cl, de, nd, hw, name in cands:
+        p = net.node_xy[nd]
+        # merge only repeated crossings of the SAME road (e.g. both carriageways)
+        if all(nm != name or np.hypot((p[0] - net.node_xy[k][0]) * lat0, p[1] - net.node_xy[k][1]) * 111_320
+               > GATEWAY_MERGE_M for k, _, nm in keep):
+            keep.append((nd, hw, name))
+    return pd.DataFrame([{"node_idx": nd, "lng": net.node_xy[nd][0], "lat": net.node_xy[nd][1],
+                          "cls": hw, "name": str(name)} for nd, hw, name in keep])
 
 
 def load_network(rebuild: bool = False) -> Network:
@@ -227,6 +300,10 @@ if __name__ == "__main__":
     print(e.groupby("highway").agg(n=("edge_id", "size"), km=("length_m", lambda s: s.sum() / 1000))
           .sort_values("km", ascending=False).round(1).to_string())
     export_major_roads(net)
+
+
+
+
 
 
 

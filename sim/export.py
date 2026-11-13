@@ -1,4 +1,4 @@
-"""Build a contract-shaped ScenarioResult dict from baseline (+ optional proposed) runs.
+﻿"""Build a contract-shaped ScenarioResult dict from baseline (+ optional proposed) runs.
 
 Sections the sim computes: metrics, agents (display sample), roads, tracts, line,
 impact.modeSplit, impact.minutesSavedByEarnings, whoPays.approval, and the values
@@ -23,10 +23,12 @@ from transit import trace
 
 DISPLAY_SAMPLE_SIZE = 3000
 SEED = 42
-# ASSUMPTION: display departure times ~ Normal(7:30, 30 min), clipped to 6:15-9:30.
-DEPART_MEAN_S = 5400
+# ASSUMPTION (display only): work ARRIVAL times ~ Normal(8:20, 30 min), clipped to
+# 7:00-9:50; departure = arrival - baseline door-to-door minutes (floored at 6:00).
+# Arrival-based so long inbound trips still play inside the 6:00-10:00 window.
+DEPART_MEAN_S = 8400
 DEPART_SD_S = 1800
-DEPART_CLIP_S = (900, 12600)
+DEPART_CLIP_S = (3600, 13800)
 PATH_SIMPLIFY_DEG = 0.00008      # ~8 m Douglas-Peucker on drive paths
 NOISE_BUFFER_M = 150.0           # contract: noise/construction zone around new track
 NETWORK_URL = "/scenarios/network.json"
@@ -62,6 +64,9 @@ def draw_sample(dem, n=DISPLAY_SAMPLE_SIZE, seed=SEED) -> Sample:
     for i, pi in enumerate(pair):
         r = od.iloc[pi]
         for arr, zi, col in ((home, r.o, "home_wt"), (work, r.d, "work_wt")):
+            if int(zi) < 0:  # inbound: home = job-weighted home point of the tract (outside the box)
+                arr[i] = (r.hlng, r.hlat)
+                continue
             g = by_bg[zones.bg.iloc[int(zi)]]
             wt = g[col].values.astype(float)
             if wt.sum() <= 0:
@@ -109,11 +114,18 @@ def _finish(mode, minutes, coords, times, lines=None):
 
 
 def drive_trip(net, run, pair, home, work, depart):
+    """Internal: path starts at home. Inbound: path starts at the gateway, at the time
+    the (estimated, not drawn) out-of-box leg ends."""
     asg = run.asg
     edges = trace_path(net, asg.sp, int(asg.od_row[pair]), int(asg.od_dest[pair]))
     half = DRIVE_TERMINAL_MIN * 30.0
-    coords, times = [list(home)], [depart]
-    t = depart + half
+    out_s = float(asg.out_min[pair]) * 60.0 if asg.out_min is not None else 0.0
+    if out_s > 0:
+        gnode = net.gateways.node_idx.values[int(asg.gateway[pair])]
+        coords, times = [list(net.node_xy[gnode])], [depart + half + out_s]
+    else:
+        coords, times = [list(home)], [depart]
+    t = depart + half + out_s
     for ei in edges:
         g = net.edge_geoms[ei]
         seg = [_seg_len(g[k], g[k + 1]) for k in range(len(g) - 1)]
@@ -131,20 +143,31 @@ def drive_trip(net, run, pair, home, work, depart):
     return _finish("drive", run.drive_min[pair], coords, times)
 
 
+def _in_box(xy, buf=0.002):
+    w, s, e, n = config.BBOX
+    return w - buf <= xy[0] <= e + buf and s - buf <= xy[1] <= n + buf
+
+
 def transit_trip(dem, run, pair, home, work, depart):
+    """Internal: path starts at home. Inbound: the estimated access leg is not drawn and
+    the rail ride is drawn only from where it enters the box (gateway station)."""
     tg, sk = run.tg, run.tsk
-    o, d = int(dem.od.o.values[pair]), int(dem.od.d.values[pair])
-    nodes = trace(tg, sk, o, d)
+    d = int(dem.od.d.values[pair])
+    ext = bool(dem.od.ext.values[pair])
+    nodes = trace(tg, sk, pair, d)
     if not nodes:
         return None
+    r = int(sk.row[pair])
+    t_acc = float(sk.access_min[pair]) * 60.0 if sk.access_min is not None else 0.0
+    o = r  # row into dist
     coords, times, lines = [], [], []
     for idx, nd in enumerate(nodes):
         xy = list(tg.node_xy[nd])
-        if idx == 0:
+        if idx == 0 and not ext:
             xy = list(home)
         elif idx == len(nodes) - 1:
             xy = list(work)
-        tt = depart + float(sk.dist[o, nd])
+        tt = depart + t_acc + float(sk.dist[o, nd])
         prev = nodes[idx - 1] if idx else None
         pi = int(tg.rs_pattern[nd])
         if pi >= 0:
@@ -156,7 +179,7 @@ def transit_trip(dem, run, pair, home, work, depart):
             if prev is not None and tg.rs_pattern[prev] == pi and p.hop_paths:
                 hp = p.hop_paths[int(tg.rs_pos[prev])]
             if hp:
-                t0 = depart + float(sk.dist[o, prev])
+                t0 = depart + t_acc + float(sk.dist[o, prev])
                 seg = [_seg_len(hp[k], hp[k + 1]) for k in range(len(hp) - 1)]
                 tot = sum(seg) or 1.0
                 acc = 0.0
@@ -164,7 +187,11 @@ def transit_trip(dem, run, pair, home, work, depart):
                     acc += seg[k - 1]
                     coords.append(hp[k]); times.append(t0 + (tt - t0) * acc / tot)
         coords.append(xy); times.append(tt)
-    return _finish("transit", run.transit_min[pair], coords, times, lines)
+    if ext:  # drop the out-of-box part of the drawn path
+        k = next((i for i, c in enumerate(coords) if _in_box(c)), len(coords) - 1)
+        coords, times = coords[k:], times[k:]
+    mode = "park_ride" if (sk.pnr is not None and sk.pnr[pair]) else "transit"
+    return _finish(mode, run.transit_min[pair], coords, times, lines)
 
 
 # ---------------------------------------------------------------------------
@@ -203,10 +230,11 @@ def tract_effects(dem, base_run, prop_run):
     od = dem.od
     eb = base_run.expected_min()
     ep = prop_run.expected_min() if prop_run is not None else eb
-    tr = z.tract.values[od.o.values]
     import pandas as pd
 
-    df = pd.DataFrame({"tract": tr, "w": od.jobs.values, "d": (ep - eb) * od.jobs.values})
+    # Residents of in-box tracts only (inbound commuters live outside these tracts).
+    df = pd.DataFrame({"tract": od.home_tract.values, "w": od.jobs.values, "d": (ep - eb) * od.jobs.values})
+    df = df[~od.ext.values]
     agg = df.groupby("tract")[["w", "d"]].sum()
     cen = z.assign(wx=z.lng * z.activity, wy=z.lat * z.activity).groupby("tract")[["wx", "wy", "activity"]].sum()
     out = []
@@ -269,6 +297,9 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
     for i in range(n_sample):
         pi = int(s.pair[i])
         trips = []
+        b_transit = s.u[i] < brun.p_transit[pi] and np.isfinite(brun.transit_min[pi])
+        b_min = brun.transit_min[pi] if b_transit else brun.drive_min[pi]
+        s.depart[i] = max(0.0, s.depart[i] - 60.0 * float(b_min))  # sampled arrival -> departure
         for run in (brun, prun):
             tr = None
             if s.u[i] < run.p_transit[pi]:
@@ -282,7 +313,7 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
         agents.append({
             "id": f"a{i:05d}", "home": [round(s.home[i][0], 5), round(s.home[i][1], 5)],
             "work": [round(s.work[i][0], 5), round(s.work[i][1], 5)],
-            "tractId": dem.zones.tract.iloc[int(dem.od.o.values[pi])],
+            "tractId": str(dem.od.home_tract.values[pi]),  # inbound: home tract outside the box
             "earningsBand": s.band[i],
             "renter": False,   # PLACEHOLDER until ACS B25003 is wired
             "hasCar": True,    # PLACEHOLDER: mode choice assumes car access (ACS B08141 TODO)
@@ -308,9 +339,15 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
             t["unit"] = "riders/day"
 
     impact = copy.deepcopy(mock["impact"])
-    impact["modeSplit"] = {"before": {"drive": round(1 - mb["transitShare"], 4), "transit": mb["transitShare"], "park_ride": 0.0},
-                           "after": {"drive": round(1 - mp["transitShare"], 4), "transit": mp["transitShare"], "park_ride": 0.0},
-                           "scope": "all modeled commuters (home and work in the study box)"}
+    def split(run):
+        p = run.p_transit
+        pnr = run.tsk.pnr if run.tsk.pnr is not None else np.zeros(len(p), bool)
+        pr = float((jobs * p * pnr).sum() / jobs.sum())
+        tr = float((jobs * p * ~pnr).sum() / jobs.sum())
+        return {"drive": round(1 - pr - tr, 4), "transit": round(tr, 4), "park_ride": round(pr, 4)}
+
+    impact["modeSplit"] = {"before": split(brun), "after": split(prun),
+                           "scope": "all modeled commuters working in the study box (internal + inbound)"}
     bands = []
     for col, band, label in (("se_low", "low", "Under $1,250/mo"), ("se_mid", "mid", "$1,250-3,333/mo"),
                              ("se_high", "high", "Over $3,333/mo")):
@@ -324,8 +361,11 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
         "whoPays.approval, verdict tests time_saved and new_riders (values only).",
         f"Not computed by the sim ({copied}): verdict headline/summary/grades/alternatives, other verdict tests, "
         "impact.tiles, impact.calibration, whoPays.items, claims, personas, lookahead.",
-        "Background road traffic is a PLACEHOLDER fraction of capacity (HPMS not wired); "
-        "in-box LODES commuters are a small share of real traffic.",
+        "Background road traffic is a PLACEHOLDER fraction of capacity (HPMS not wired), lowered now that "
+        "inbound commuters are modeled.",
+        "Inbound commuters (home outside the box): only the in-box part of their trip is routed on the network; "
+        "the approach outside the box (drive to a gateway, or walk/drive to a MARTA station) is an ESTIMATE "
+        "added to their minutes. Their drawn paths start where they enter the box. Outbound commuters are not modeled.",
         "Mode choice: one global constant calibrated to a PLACEHOLDER 12% transit share (ACS not wired).",
     ]
 
@@ -357,3 +397,6 @@ def write_result(res: dict, name: str | None = None):
     path.write_text(json.dumps(res, separators=(",", ":")), encoding="utf-8")
     print(f"wrote {path} ({path.stat().st_size/1e6:.2f} MB, {len(res['agents'])} agents)")
     return path
+
+
+
