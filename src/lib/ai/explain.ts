@@ -97,7 +97,10 @@ export async function explainResult(req: ExplainRequest): Promise<Insight | null
     if (!parsed.success) return null;
     // Two sentences at most, whatever the model wrote, so the five tests stay in view.
     const summary = parsed.data.summary.trim().split(/(?<=[.!?])\s+/).slice(0, 2).join(" ");
-    return { summary, followUps: parsed.data.followUps.map((f) => f.trim().replace(/[.!]+$/, "")).slice(0, 3) };
+    // A frequency change has no stops to add to: drop that suggestion if the model made it anyway.
+    const noStops = req.plan.type === "change_frequency";
+    const followUps = parsed.data.followUps.map((f) => f.trim().replace(/[.!]+$/, "")).filter((f) => !(noStops && /\bstop\b/i.test(f)));
+    return { summary, followUps: followUps.slice(0, 3) };
   } catch (e) {
     console.warn("explain: Claude call failed:", e instanceof Error ? e.message : e);
     return null;
