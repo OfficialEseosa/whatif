@@ -1,36 +1,69 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# WhatIf ATL
 
-## Getting Started
+Type a transit plan in plain English, or paste a news article about one. The line draws itself on Atlanta, commuters reroute, and panels show a verdict (five scored tests), impact, who pays, a town hall of residents, an article claim check, a cited history timeline that overlays the map, and a Year 5 / Year 10 look-ahead.
 
-First, run the development server:
+Everything currently runs on **mock data** (`isMock: true`, and the UI says so). The UI is a deliberately plain functional shell; a designer owns the visual design.
+
+## Run
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev          # http://localhost:3000
+npm run lint
+npm run build
+npm run mock         # regenerate the mock scenario (deterministic)
+npm run check:api    # with the app running: validates all API routes against the contract
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Node 22.18+ is required (the scripts import `src/lib/contract.ts` directly via Node's type stripping).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Copy `.env.local.example` to `.env.local` (gitignored). All optional:
 
-## Learn More
+| Var | Used by | Without it |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | `/api/plan`, `/api/persona` (server) | canned plan/claims/replies |
+| `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` | Google Photorealistic 3D Tiles + Map Tiles 2D (browser) | keyless vector map |
+| `SIM_URL` | `/api/simulate` proxies to `${SIM_URL}/simulate` | serves `public/scenarios/beltline-streetcar.json` |
 
-To learn more about Next.js, take a look at the following resources:
+## Lanes (who owns what)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+| Lane | Owner | Paths |
+|---|---|---|
+| Map + frontend | Prosper | `src/components/**`, `src/app/page.tsx`, `src/app/layout.tsx`, `src/app/globals.css`, `src/lib/store.ts`, `src/lib/api.ts`, `src/lib/format.ts`, `src/hooks/**`, `src/app/api/map-session/**` |
+| Visual design | Designer | restyles `src/components/**` and `src/app/globals.css` (tokens at the top) and `src/components/map/colors.ts`, alongside Prosper |
+| AI, gazetteer, history, claims | Samuel | `src/app/api/plan/**`, `src/app/api/persona/**`, `src/lib/ai/**`, `src/data/gazetteer.json`, `src/data/history.json` |
+| Simulation | Raphael | `sim/**`, `src/app/api/simulate/**`, `public/scenarios/**`, `scripts/**`, `src/lib/scenarios.ts`, and **owner of `src/lib/contract.ts`** (contract changes go through him) |
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Shared helper `src/lib/http.ts` is tiny; coordinate before changing it.
 
-## Deploy on Vercel
+## The contract
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+`src/lib/contract.ts` is the single source of truth: zod schemas + inferred TS types for `ScenarioEdit`, `ScenarioResult` (line, metrics, verdict, impact, agents with TripsLayer-shaped trips, road and tract effects, who pays, claims, personas, look-ahead), `Network`, `HistoryEvent`, `GazetteerPlace`, and the request/response types of every API route. The Python sim mirrors it in `sim/contract.py`. Conventions: coordinates are `[lng, lat]`; trip timestamps are seconds after 6:00 AM; shares are 0..1.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+API routes (all validate input and output with the contract):
+
+- `POST /api/plan` `{ text, mode: "prompt" | "article" | "fix" }` → `{ edit, claims?, candidates?, isMock }` — `TODO(Samuel)` in `src/lib/ai/plan.ts`
+- `POST /api/simulate` `{ edit, claims? }` → `ScenarioResult` — `TODO(Raphael)` in the route
+- `POST /api/persona` `{ scenarioId, personaId, messages }` → `{ personaId, reply, isMock }` — `TODO(Samuel)` in `src/lib/ai/persona.ts`
+- `GET /api/map-session` → Google 2D tiles session token (404 without a key)
+
+## Mock data
+
+- `src/data/gazetteer.json` — 31 places; coordinates from OpenStreetMap (Overpass), the source noted per place. Plan stops may only use these ids.
+- `src/data/history.json` — events from the plan's history-layer table, all `verified: false` until checked.
+- `public/scenarios/network.json` — real OSM roads (motorway → tertiary), MARTA rail, Atlanta Streetcar, freight rail, stations and Beltline trails for lng −84.42..−84.33, lat 33.73..33.80, plus history overlay shapes (redline/renewal/county shapes are hand-drawn **placeholders**, flagged `placeholder: true`).
+- `public/scenarios/beltline-streetcar.json` — one full `ScenarioResult`: Streetcar East along Edgewood Ave and the Eastside Trail to Ponce City Market, 3,000 agents routed over the real road graph. Every number is a placeholder.
+
+Regenerate both with `npm run mock` (`scripts/make-mock-scenario.mjs`, seeded, validates against the contract before writing). The OSM snapshot is committed at `scripts/data/osm-atl-core.json`; `npm run fetch:osm` refreshes it.
+
+## Map and the keyless fallback
+
+deck.gl only (no MapLibre/Mapbox), client-only via `next/dynamic` (`ssr: false`). One camera is shared by both views; the toggle swaps the basemap. Each layer is its own module in `src/components/map/layers/`.
+
+- **Analysis**: Google Map Tiles 2D (dark style) when `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is set; otherwise the **keyless fallback**: the CSS background plus real OSM roads drawn as `PathLayer`s.
+- **Photoreal 3D**: Google Photorealistic 3D Tiles via `Tile3DLayer` when the key is set; otherwise the keyless map, tilted.
+- Google attribution is shown whenever Google tiles are on screen; otherwise "© OpenStreetMap contributors".
+
+Build it: `/api/plan` → pipeline steps → `/api/simulate` → the line draws → agents switch from baseline to proposed trips → panels fill. The scrubber drives `TripsLayer.currentTime`; history cards switch on overlays; Year 5/10 fades at-risk agents and shows the rent-pressure zone.
