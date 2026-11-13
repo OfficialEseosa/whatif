@@ -1,4 +1,4 @@
-"""Pydantic mirror of src/lib/contract.ts (CONTRACT_VERSION 1.0.0).
+﻿"""Pydantic mirror of src/lib/contract.ts (CONTRACT_VERSION 1.1.0).
 
 Only what the sim reads or writes is typed tightly; sections the sim copies
 through from the mock (verdict, whoPays, claims, personas, lookahead, impact
@@ -11,7 +11,7 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-CONTRACT_VERSION = "1.0.0"
+CONTRACT_VERSION = "1.1.0"
 
 LngLat = tuple[float, float]
 EditType = Literal["new_rail_line", "extend_line", "new_bus_route", "change_frequency",
@@ -128,6 +128,8 @@ class TimeWindow(_M):
 
 class ScenarioResult(_M):
     id: str
+    source: Optional[Literal["live_sim", "prebaked_sim", "mock"]] = None
+    mockSections: Optional[list[str]] = None
     contractVersion: str
     title: str
     edit: ScenarioEdit
@@ -159,3 +161,4 @@ class ScenarioResult(_M):
 class SimulateRequest(_M):
     edit: ScenarioEdit
     claims: Optional[list[dict[str, Any]]] = None
+

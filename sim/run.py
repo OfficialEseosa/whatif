@@ -1,4 +1,4 @@
-"""CLI entry points.
+﻿"""CLI entry points.
 
     python run.py baseline [--rebuild] [--sample 3000]   -> public/scenarios/baseline.sim.json
     python run.py beltline [--sample 3000]               -> public/scenarios/beltline-streetcar.sim.json
@@ -27,6 +27,9 @@ def cmd_baseline(a):
     res = export.build_result("baseline", "Today's network (baseline)", BASELINE_EDIT, base, None,
                               n_sample=a.sample)
     export.write_result(res)
+    import transit
+
+    transit.export_service()
     print(f"baseline: model/cache {t_model:.1f}s, export {time.time()-t-t_model:.1f}s")
 
 
@@ -49,3 +52,4 @@ if __name__ == "__main__":
     ap.add_argument("--sample", type=int, default=export.DISPLAY_SAMPLE_SIZE)
     a = ap.parse_args()
     {"baseline": cmd_baseline, "beltline": cmd_beltline, "sanity": cmd_sanity}[a.cmd](a)
+

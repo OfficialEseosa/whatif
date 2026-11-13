@@ -1,4 +1,4 @@
-"""FastAPI service.
+﻿"""FastAPI service.
 
     uvicorn main:app --port 8000          (run from sim/, venv active)
 
@@ -86,6 +86,7 @@ def simulate(req: SimulateRequest):
     except NotImplementedError as ex:
         raise HTTPException(status_code=501, detail=str(ex)) from ex
     timings = res.pop("_timings", {})
+    res["source"] = "live_sim"
     return Response(json.dumps(res, separators=(",", ":")), media_type="application/json",
                     headers={"X-Sim-Source": "live", "X-Sim-Seconds": f"{timings.get('total_s', 0):.1f}"})
 
@@ -94,3 +95,4 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="127.0.0.1", port=8000)
+
