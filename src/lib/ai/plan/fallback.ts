@@ -326,6 +326,15 @@ export function fallbackEdit(text: string, opts: FallbackOptions = {}): Scenario
   let baseLineId: string | undefined;
   if (type === "extend_line" || type === "change_frequency") {
     const mentioned = findRailLineMentions(text, network).filter((id) => id !== "freight");
+    // MARTA colour names ("Red line") are not track names in network.json; map them to the track they run on.
+    const colour = /\b(red|gold|blue|green)\s+line\b/i.exec(text)?.[1].toLowerCase();
+    if (mentioned.length === 0 && colour) {
+      const id = colour === "red" || colour === "gold" ? "marta_north" : "marta_east_west";
+      if (isRailLineId(id, network)) {
+        mentioned.push(id);
+        assumptions.push(`MARTA ${colour[0].toUpperCase()}${colour.slice(1)} line read as "${id}" (the track it runs on in the study area).`);
+      }
+    }
     if (mentioned.length > 0) {
       baseLineId = mentioned[0];
       const line = getRailLine(baseLineId, network);

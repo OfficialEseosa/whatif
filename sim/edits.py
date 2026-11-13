@@ -85,6 +85,12 @@ def apply_change_frequency(base, edit):
         raise EditError(f"change_frequency: unknown line '{edit.get('baseLineId')}'")
     if not h:
         raise EditError("change_frequency: headwayMin is required")
+    # The parser notes a MARTA colour ("MARTA Red line read as ..."): change that route only.
+    import re
+
+    m = re.search(r"MARTA (Red|Gold|Blue|Green) line", " ".join(edit.get("assumptions") or []))
+    if m and m.group(1).upper() in names:
+        names = [m.group(1).upper()]
     td0 = base.run.td
     pats, hits, old = [], [], []
     for p in td0.patterns:
@@ -106,7 +112,11 @@ def apply_change_frequency(base, edit):
         costs.not_applicable("the edit removes service, so it saves operating cost rather than adding it")
     notes = [f"Peak headway on {', '.join(names)} set to {h:g} min (GTFS 7-9 AM headways were "
              f"{', '.join(sorted({f'{o[1]:g}' for o in old}))} min); waits = headway/2."]
-    line = {"path": _hop_concat([pats[i] for i in hits]), "stops": []}
+    # drawn line: the longest changed pattern (one direction), simplified to 15 m
+    import display
+
+    longest = max((pats[i] for i in hits), key=lambda q: len(q.stop_ids))
+    line = {"path": display.simplify(_hop_concat([longest])), "stops": []}
     return {"td": td, "cap": base.run.capacity.copy(), "closed": None, "extra_od": None, "road_only": False,
             "new_pats": set(hits), "line": line, "notes": notes,
             "change": {"track": None, "stops": [], "cost": cost}}
@@ -314,6 +324,12 @@ def apply_new_line(base, edit, build_corridor, path_on_road):
     stops = edit.get("stops") or []
     if len(stops) < 2:
         got = ", ".join(s["name"] for s in stops) or "none"
+        import re
+
+        miss = re.findall(r"Could not place '([^']+)'", " ".join(edit.get("assumptions") or []))
+        if miss:
+            raise EditError(f"{' and '.join(miss)} is outside the area the simulator covers, or is not a place it "
+                            f"knows; a new line needs two stops in central Atlanta.")
         raise EditError(f"A new line needs at least two stops inside the simulated area; got {len(stops)} ({got}). "
                         f"Places outside the core box (Downtown, Midtown, Old Fourth Ward, Eastside) are not "
                         f"simulated yet.")
