@@ -69,7 +69,8 @@ function Card() {
   const reason = verdictReason(v);
   const source = scenarioSource(scenario);
   const hasClaims = scenario.claims.length > 0;
-  const anyMock = scenario.isMock || (scenario.mockSections?.length ?? 0) > 0;
+  // The footer names where the verdict and tests came from. Placeholder parts of the breakdown carry their own tags.
+  const anyMock = scenario.isMock;
 
   // A result from an article opens on its claim check; anything else opens collapsed.
   useEffect(() => {
