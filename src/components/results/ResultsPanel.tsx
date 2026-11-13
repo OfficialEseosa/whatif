@@ -198,7 +198,7 @@ function NotSimulated({ run }: { run: RunRecord }) {
       <p className="verdict-headline">
         {e.type === "change_frequency" ? `${editLine(e, network)}.` : `${planLine(e)}. ${editLine(e, network)}.`}
       </p>
-      <p className="verdict-reason">We understood the plan and drew it on the map, but could not test it. {why.reason}</p>
+      <p className="verdict-reason">We understood the plan and drew it on the map, but could not test it. {why.detail ? `${why.detail.replace(/[.\s]+$/, "")}.` : why.reason}</p>
       <div className="results-foot results-actions">
         {/* The only plan with a saved simulation run today (public/scenarios/beltline-streetcar.sim.json). */}
         <button className="btn" onClick={tryStreetcar}>

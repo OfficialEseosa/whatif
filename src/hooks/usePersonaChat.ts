@@ -11,7 +11,11 @@ export function usePersonaChat() {
     const messages = [...chat.messages, { role: "user" as const, content: content.trim() }];
     set({ chat: { ...chat, messages, pending: true } });
     try {
-      const res = await api.persona({ scenarioId: scenario.id, personaId: chat.personaId, messages });
+      // Send the resident and this plan's results, so the answer is about the plan on screen.
+      const persona = scenario.personas.find((p) => p.id === chat.personaId);
+      const v = scenario.verdict;
+      const context = { plan: scenario.title.slice(0, 300), verdict: v.label, results: v.summary.slice(0, 4000) };
+      const res = await api.persona({ scenarioId: scenario.id, personaId: chat.personaId, messages, ...(persona ? { persona, context } : {}) });
       const cur = useStore.getState().chat;
       if (cur?.personaId === chat.personaId)
         set({ chat: { ...cur, messages: [...messages, { role: "persona", content: res.reply }], pending: false } });

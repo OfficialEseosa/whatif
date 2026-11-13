@@ -679,6 +679,9 @@ export const PersonaRequestSchema = z.object({
   scenarioId: z.string(),
   personaId: z.string(),
   messages: z.array(ChatMessageSchema).max(50),
+  /** Optional (additive): the resident and the plan's results, so a live run (not a stored file) can be discussed. */
+  persona: PersonaSchema.optional(),
+  context: z.object({ plan: z.string().max(300), verdict: z.string().max(40), results: z.string().max(4000) }).optional(),
 });
 export type PersonaRequest = z.infer<typeof PersonaRequestSchema>;
 
