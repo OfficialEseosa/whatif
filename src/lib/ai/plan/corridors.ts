@@ -63,7 +63,7 @@ export const KNOWN_CORRIDORS: KnownCorridor[] = [
 const LINE_TYPES = new Set<ScenarioEdit["type"]>(["extend_line", "new_rail_line"]);
 
 /** Parser notes that no longer hold once the corridor fills the route in. */
-const STALE_PREFIXES = ["Only one place found", "Assumed base line is", "Assumed streetcar technology", "No gazetteer place found"];
+const STALE_PREFIXES = ["Only found one place", "No existing line was named", "Assumed a streetcar", "No place from the map"];
 
 export function matchesCorridor(edit: ScenarioEdit, corridor: KnownCorridor): boolean {
   if (!LINE_TYPES.has(edit.type) || edit.tech !== corridor.tech) return false;
@@ -89,8 +89,8 @@ function corridorEdit(corridor: KnownCorridor, parsed: ScenarioEdit, text: strin
   let headwayMin = base.headwayMin;
   if (parsed.headwayMin !== undefined && parsed.headwayMin !== base.headwayMin) {
     headwayMin = parsed.headwayMin;
-    kept.push(`your ${parsed.headwayMin}-minute headway`);
-  } else if (parsed.headwayMin === undefined) filled.push(`${base.headwayMin}-minute headway`);
+    kept.push(`your "every ${parsed.headwayMin} minutes"`);
+  } else if (parsed.headwayMin === undefined) filled.push(`a streetcar every ${base.headwayMin} minutes`);
   let lanesRemoved = base.lanesRemoved;
   const statedLanes = KEEP_LANES_RX.test(text) ? 0 : parseLanesRemoved(text);
   if (statedLanes !== undefined && statedLanes !== base.lanesRemoved) {
@@ -102,7 +102,7 @@ function corridorEdit(corridor: KnownCorridor, parsed: ScenarioEdit, text: strin
     PARSER_NOTE,
     note,
     `The ${list(filled)} were filled in from ${corridor.description}.`,
-    ...(parsed.type !== base.type ? [`Treated as ${base.type === "extend_line" ? "an extension of" : "a change to"} the existing line ("${corridor.baseLineId}").`] : []),
+    ...(parsed.type !== base.type ? [`Treated as ${base.type === "extend_line" ? "an extension of" : "a change to"} the existing streetcar line.`] : []),
     ...(kept.length ? [`Kept ${list(kept)}, so this differs from the saved simulation run.`] : []),
     ...(parsed.assumptions ?? []).filter((a) => a !== PARSER_NOTE && !STALE_PREFIXES.some((p) => a.startsWith(p))),
   ];
@@ -120,11 +120,11 @@ function corridorEdit(corridor: KnownCorridor, parsed: ScenarioEdit, text: strin
  */
 export function resolveKnownCorridor(req: PlanRequest, res: PlanResponse, corridors: KnownCorridor[] = KNOWN_CORRIDORS): PlanResponse {
   const direct = corridors.find((c) => matchesCorridor(res.edit, c));
-  if (direct) return { ...res, edit: corridorEdit(direct, res.edit, req.text, "Matched a studied corridor that has a saved simulation run.") };
+  if (direct) return { ...res, edit: corridorEdit(direct, res.edit, req.text, "This matches a studied route that has a saved simulation run.") };
   if (req.mode === "fix" && !isActionable(res.edit)) {
     const served = corridors.find((c) => c.serves.test(req.text));
     if (served) {
-      const note = "Fix mode: the keyword parser cannot design a fix, so this suggests a studied corridor that serves the area you named.";
+      const note = "This suggests a studied route that serves the area you named.";
       return { ...res, edit: corridorEdit(served, { ...res.edit, type: served.edit().type, headwayMin: undefined }, req.text, note) };
     }
   }

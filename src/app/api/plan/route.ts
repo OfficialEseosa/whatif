@@ -4,6 +4,9 @@ import { apiError, readBody } from "@/lib/http";
 import { UnplaceablePlanError, parsePlan } from "@/lib/ai/plan";
 import { gazetteer } from "@/lib/ai/mock";
 
+// The Claude call is capped at 12 s; leave room for it on the Node runtime.
+export const maxDuration = 30;
+
 export async function POST(req: Request) {
   const [body, err] = await readBody(req, PlanRequestSchema);
   if (err) return err;

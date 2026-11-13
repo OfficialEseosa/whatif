@@ -40,11 +40,11 @@ import {
   type TransitTech,
 } from "@/lib/contract";
 import { findPlaceMatches, loadGazetteer, preclean, toStop, tokenize } from "./gazetteer";
-import { findRailLineMentions, findRoadMentions, getRailLine, isRailLineId, loadNetwork } from "./network";
+import { findRailLineMentions, findRoadIdsByName, findRoadMentions, getRailLine, isRailLineId, isRoadId, loadNetwork } from "./network";
 // Article-analyst's deterministic extractor (read-only dependency; never edited here).
 import { extractClaimsDeterministic } from "@/lib/ai/article/extractClaims";
 
-export const PARSER_NOTE = "Deterministic keyword parser used (no model call); review before relying on this edit.";
+export const PARSER_NOTE = "Read with keyword rules, not Claude.";
 
 export const DEFAULTS = {
   headwayMin: 10,
@@ -53,9 +53,29 @@ export const DEFAULTS = {
   streetcarLineId: "atlanta_streetcar",
 } as const;
 
+/**
+ * What the model read from the text (see ./claude.ts). Each value replaces the matching keyword
+ * rule below; ids are still checked against the gazetteer and network here, so the model never
+ * supplies a coordinate or an id that does not exist.
+ */
+export interface PlanHints {
+  type?: EditType;
+  tech?: TransitTech;
+  stopIds?: string[];
+  roadNames?: string[];
+  roadIds?: string[];
+  baseLineId?: string;
+  headwayMin?: number;
+  lanesRemoved?: number;
+  chargeUsd?: number;
+  name?: string;
+  notes?: string[];
+}
+
 export interface FallbackOptions {
   gazetteer?: GazetteerPlace[];
   network?: Network;
+  hints?: PlanHints;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -312,27 +332,29 @@ function corridorsFor(stops: Stop[], gazetteer: GazetteerPlace[]): string[] {
 export function fallbackEdit(text: string, opts: FallbackOptions = {}): ScenarioEdit {
   const gazetteer = opts.gazetteer ?? loadGazetteer();
   const network = opts.network ?? loadNetwork();
-  const assumptions: string[] = [PARSER_NOTE];
+  const hints = opts.hints;
+  const assumptions: string[] = hints ? [...(hints.notes ?? [])] : [PARSER_NOTE];
   /** Which title-visible values came from DEFAULTS rather than the text; the title marks them "(assumed)". */
   const assumed = { baseLine: false, headway: false, charge: false };
   const mark = (value: string | number, isAssumed: boolean) => `${value}${isAssumed ? " (assumed)" : ""}`;
 
   // Tech and type.
-  const explicitTech = detectTech(text);
-  const type = detectEditType(text, explicitTech);
+  const explicitTech = hints?.tech ?? detectTech(text);
+  const type = hints?.type ?? detectEditType(text, explicitTech);
   let tech: TransitTech | undefined = explicitTech;
 
   // Base line (extend_line / change_frequency only).
   let baseLineId: string | undefined;
   if (type === "extend_line" || type === "change_frequency") {
-    const mentioned = findRailLineMentions(text, network).filter((id) => id !== "freight");
+    const mentioned =
+      hints?.baseLineId && isRailLineId(hints.baseLineId, network) ? [hints.baseLineId] : findRailLineMentions(text, network).filter((id) => id !== "freight");
     // MARTA colour names ("Red line") are not track names in network.json; map them to the track they run on.
     const colour = /\b(red|gold|blue|green)\s+line\b/i.exec(text)?.[1].toLowerCase();
     if (mentioned.length === 0 && colour) {
       const id = colour === "red" || colour === "gold" ? "marta_north" : "marta_east_west";
       if (isRailLineId(id, network)) {
         mentioned.push(id);
-        assumptions.push(`MARTA ${colour[0].toUpperCase()}${colour.slice(1)} line read as "${id}" (the track it runs on in the study area).`);
+        assumptions.push(`The MARTA ${colour[0].toUpperCase()}${colour.slice(1)} line is read as the ${getRailLine(id, network)?.name ?? id}, the track it runs on here.`);
       }
     }
     if (mentioned.length > 0) {
@@ -340,27 +362,26 @@ export function fallbackEdit(text: string, opts: FallbackOptions = {}): Scenario
       const line = getRailLine(baseLineId, network);
       const lineTech = line ? techFromLineKind(line.kind) : undefined;
       if (lineTech && lineTech !== tech) {
-        if (tech) assumptions.push(`Tech set to ${lineTech} to match the named line "${line?.name}" (text said ${tech}).`);
+        if (tech) assumptions.push(`Treated as ${TECH_LABEL[lineTech].toLowerCase()}, which is what the ${line?.name} runs.`);
         tech = lineTech;
       }
     } else if ((tech ?? "streetcar") === "streetcar" && isRailLineId(DEFAULTS.streetcarLineId, network)) {
       baseLineId = DEFAULTS.streetcarLineId;
       assumed.baseLine = true;
-      assumptions.push(`Assumed base line is the Atlanta Streetcar ("${DEFAULTS.streetcarLineId}"); no existing line was named.`);
+      assumptions.push("No existing line was named, so this extends the Atlanta Streetcar.");
     } else {
-      assumptions.push("No existing line named in the text; baseLineId omitted.");
+      assumptions.push("Couldn't tell which existing line you meant.");
     }
   }
 
   // Tech defaults.
   if (type === "brt_lane") {
-    if (tech !== "brt") assumptions.push("Tech set to brt for a bus-lane edit.");
     tech = "brt";
   } else if (type === "new_bus_route") {
     tech = "bus";
   } else if (TRANSIT_TYPES.has(type) && tech === undefined) {
     tech = "streetcar";
-    assumptions.push("Assumed streetcar technology; not stated.");
+    assumptions.push("Assumed a streetcar; you didn't say what kind of vehicle.");
   } else if (!TRANSIT_TYPES.has(type)) {
     tech = undefined;
   }
@@ -373,13 +394,16 @@ export function fallbackEdit(text: string, opts: FallbackOptions = {}): Scenario
     for (let i = m.start; i < m.end; i++) covered.add(i);
     if (!placeIds.includes(m.id)) placeIds.push(m.id);
   }
+  if (hints?.stopIds) placeIds.splice(0, placeIds.length, ...new Set(hints.stopIds));
   const places = placeIds.map((id) => toStop(id, gazetteer)).filter((s): s is Stop => s !== undefined);
   const stops = TRANSIT_TYPES.has(type) ? places : [];
   if (TRANSIT_TYPES.has(type)) {
-    if (stops.length === 0) assumptions.push("No gazetteer place found in the text; stops are empty.");
-    else if (stops.length === 1 && type !== "change_frequency") assumptions.push(`Only one place found ("${stops[0].name}"); a line needs at least two stops.`);
+    // A frequency change needs a line and a bus lane can run on a named street; neither needs places.
+    const needsPlaces = type !== "change_frequency" && type !== "brt_lane";
+    if (needsPlaces && stops.length === 0) assumptions.push("No place from the map was found in your text, so the plan has no stops.");
+    else if (needsPlaces && stops.length === 1) assumptions.push(`Only found one place, ${stops[0].name}. A line needs at least two.`);
   } else if (places.length > 0) {
-    assumptions.push(`Places mentioned (not used as stops for a ${type} edit): ${places.map((p) => p.name).join(", ")}.`);
+    assumptions.push(`${places.map((p) => p.name).join(", ")} noted, but this kind of plan has no stops.`);
   }
 
   // Roads.
@@ -390,52 +414,54 @@ export function fallbackEdit(text: string, opts: FallbackOptions = {}): Scenario
   if (ROAD_TYPES.has(type)) {
     const mentions = findRoadMentions(text, network, placeTokens);
     for (const m of mentions) for (let i = m.start; i < m.end; i++) covered.add(i);
-    const ids = [...new Set(mentions.flatMap((m) => m.roadIds))];
-    roadNames = mentions.map((m) => m.displayName);
+    const hinted = (hints?.roadNames ?? []).map((name) => ({ name, ids: findRoadIdsByName(name, network) })).filter((r) => r.ids.length > 0);
+    const hintIds = [...(hints?.roadIds ?? []).filter((id) => isRoadId(id, network)), ...hinted.flatMap((r) => r.ids)];
+    const ids = [...new Set(hintIds.length > 0 ? hintIds : mentions.flatMap((m) => m.roadIds))];
+    roadNames = hintIds.length > 0 ? hinted.map((r) => r.name) : mentions.map((m) => m.displayName);
     if (ids.length > 0) roadIds = ids;
-    else if (type === "brt_lane" && stops.length >= 2) assumptions.push("No road named; the bus lane follows the street route between the stops.");
-    else assumptions.push("No road in the network matched a name in the text; roadIds omitted.");
+    else if (type === "brt_lane" && stops.length >= 2) assumptions.push("No street named, so the bus lane follows the streets between the stops.");
+    else assumptions.push("No street from the map matched your text.");
   } else {
     // Still mark road mentions as covered so they are not reported as unknown places.
     for (const m of findRoadMentions(text, network, placeTokens)) for (let i = m.start; i < m.end; i++) covered.add(i);
   }
 
   // Unknown places.
-  for (const phrase of findUnplacedPhrases(text, covered)) assumptions.push(`Could not place '${phrase}'; not in gazetteer.`);
+  if (!hints) for (const phrase of findUnplacedPhrases(text, covered)) assumptions.push(`Couldn't find '${phrase}' on the map.`);
 
   // Numeric fields.
   let headwayMin: number | undefined;
   if (TRANSIT_TYPES.has(type)) {
-    headwayMin = parseHeadwayMin(text);
+    headwayMin = hints?.headwayMin ?? parseHeadwayMin(text);
     if (headwayMin === undefined && type === "change_frequency") {
       headwayMin = DEFAULTS.headwayMin;
       assumed.headway = true;
-      assumptions.push(`Assumed ${DEFAULTS.headwayMin}-min peak headway; not stated.`);
+      assumptions.push(`Assumed every ${DEFAULTS.headwayMin} minutes; you didn't say how often.`);
     }
   }
   let lanesRemoved: number | undefined;
   if (type === "brt_lane") {
-    lanesRemoved = parseLanesRemoved(text);
+    lanesRemoved = hints?.lanesRemoved ?? parseLanesRemoved(text);
     if (lanesRemoved === undefined) {
       lanesRemoved = DEFAULTS.lanesRemoved;
-      assumptions.push(`Assumed ${DEFAULTS.lanesRemoved} car lane removed per direction; not stated.`);
+      assumptions.push(`Assumed ${DEFAULTS.lanesRemoved} car lane each way becomes the bus lane; you didn't say how many.`);
     }
   }
   let chargeUsd: number | undefined;
   let chargeZone: LngLat[] | undefined;
   if (type === "congestion_charge") {
-    chargeUsd = parseChargeUsd(text);
+    chargeUsd = hints?.chargeUsd ?? parseChargeUsd(text);
     if (chargeUsd === undefined) {
       chargeUsd = DEFAULTS.chargeUsd;
       assumed.charge = true;
-      assumptions.push(`Assumed $${DEFAULTS.chargeUsd} per entry; not stated.`);
+      assumptions.push(`Assumed $${DEFAULTS.chargeUsd} per entry; you didn't give a price.`);
     }
     const hull = convexHull(places.map((p) => p.coord));
     if (hull.length >= 3) {
       chargeZone = hull;
-      assumptions.push(`Cordon approximated as the convex hull of the mentioned places (${places.map((p) => p.name).join(", ")}).`);
+      assumptions.push(`The charge zone is drawn around ${places.map((p) => p.name).join(", ")}.`);
     } else {
-      assumptions.push("Fewer than three places mentioned; chargeZone omitted.");
+      assumptions.push("Fewer than three places named, so no charge zone could be drawn.");
     }
   }
 
@@ -476,6 +502,7 @@ export function fallbackEdit(text: string, opts: FallbackOptions = {}): Scenario
       name = `Congestion charge: ${mark(`$${chargeUsd} per entry`, assumed.charge)}`;
       break;
   }
+  if (hints?.name) name = hints.name;
 
   const edit: ScenarioEdit = {
     type,
@@ -502,19 +529,20 @@ export function fallbackEdit(text: string, opts: FallbackOptions = {}): Scenario
 }
 
 /**
- * Deterministic PlanResponse. Always `isMock: true`. Article mode: `claims`
+ * PlanResponse built by the rules above. `isMock: true` unless the model's `hints` were used. Article mode: `claims`
  * from article-analyst's `extractClaimsDeterministic`. Fix mode: `candidates`
  * omitted; alternatives need the model and simulation results.
  */
 export function fallbackPlan(req: PlanRequest, opts: FallbackOptions = {}): PlanResponse {
   const edit = fallbackEdit(req.text, opts);
   if (req.mode === "fix") {
-    edit.assumptions = [...(edit.assumptions ?? []), "Fix mode: alternative candidates need the model; none generated by the deterministic parser."];
+    edit.assumptions = [...(edit.assumptions ?? []), "No alternative fixes were generated for this."];
     return PlanResponseSchema.parse({ edit, isMock: true });
   }
+  const isMock = !opts.hints;
   if (req.mode === "article") {
-    edit.assumptions = [...(edit.assumptions ?? []), "Article mode: claims extracted by the deterministic (keyword) extractor."];
-    return PlanResponseSchema.parse({ edit, claims: extractClaimsDeterministic(req.text), isMock: true });
+    if (isMock) edit.assumptions = [...(edit.assumptions ?? []), "Claims in the article were picked out by keyword rules."];
+    return PlanResponseSchema.parse({ edit, claims: extractClaimsDeterministic(req.text), isMock });
   }
-  return PlanResponseSchema.parse({ edit, isMock: true });
+  return PlanResponseSchema.parse({ edit, isMock });
 }

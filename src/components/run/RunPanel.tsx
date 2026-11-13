@@ -217,7 +217,6 @@ function StepLine({ step, run, elapsed, onRetry }: { step: PipelineStep; run: Ru
         <>
           {run.previousEdit && <p className="rp-line">Changing {run.previousEdit.name}</p>}
           {e && <p className="rp-line">{planLine(e)}</p>}
-          {run.planSource === "mock_parser" && <p className="rp-line rp-amber">Example plan used, the plan reader is offline</p>}
           {run.planSource === "alternative" && <p className="rp-line">From a suggested option</p>}
           {run.planSource === "restored" && <p className="rp-line">Reopened from earlier</p>}
         </>
