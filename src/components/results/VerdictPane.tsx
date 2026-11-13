@@ -28,6 +28,8 @@ function CountUp({ value, unit }: { value: number; unit: string }) {
   return <>{formatValue(k >= 1 ? value : value * k, unit)}</>;
 }
 
+const RATING_WORD = { accurate: "Accurate", overstated: "Overstated", understated: "Understated", partly: "Partly", unsupported: "Can't check" } as const;
+
 const GRADE_WORD = { good: "Good", fair: "Fair", poor: "Poor" } as const;
 
 /** The five tests: label left, value and grade right. */
@@ -84,7 +86,7 @@ export function ClaimCheckList({ claims }: { claims: ClaimCheck[]; mock?: boolea
           <li key={c.id} className="claim">
             <div className="item-row">
               <q className="grow claim-quote">{c.quote}</q>
-              <span className={`grade grade-${RATING_TONE[c.rating]}`}>{c.rating}</span>
+              <span className={c.rating === "unsupported" ? "grade muted" : `grade grade-${RATING_TONE[c.rating]}`}>{RATING_WORD[c.rating]}</span>
             </div>
             <dl className="claim-pair">
               <div>

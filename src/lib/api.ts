@@ -67,7 +67,7 @@ async function simulate(req: SimulateRequest): Promise<{ result: ScenarioResult;
       mockSections: mockSections ?? parsed.data.mockSections ?? [],
       isMock: isMock ?? (source === "mock" || parsed.data.isMock),
       // Article claims are only meaningful when the plan came from an article (as the route did).
-      claims: req.claims?.length ? parsed.data.claims : [],
+      claims: req.claims?.length ? (ptr.data.claims ?? parsed.data.claims) : [],
     };
     return { result, timing: { routeMs, file: { url: ptr.data.scenarioUrl, ms: performance.now() - t1, bytes: text.length } } };
   }

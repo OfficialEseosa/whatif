@@ -655,6 +655,8 @@ export const SimulatePointerSchema = z.object({
   isMock: z.boolean().optional(),
   /** True when a stored sim run matched the requested edit (false for the placeholder mock). */
   matched: z.boolean().optional(),
+  /** Article claims checked against this result (only when the request carried claims). */
+  claims: z.array(ClaimCheckSchema).optional(),
 });
 export type SimulatePointer = z.infer<typeof SimulatePointerSchema>;
 /** What POST /api/simulate can return: a full result (live sim) or a pointer to a stored one. */

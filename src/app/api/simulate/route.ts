@@ -8,7 +8,10 @@
 // the same source is in the `X-Scenario-Source` response header.
 // Stored results (2 and 3, or a prebaked file the sim served) come back as a small SimulatePointer
 // to the static file instead of the body: Vercel caps function responses at 4.5 MB.
+// When the request carries article claims, `claims` is recomputed from the chosen result
+// (compareClaims), so the article check always matches the numbers on screen; a pointer carries them.
 import { ScenarioResultSchema, SimulateRequestSchema, type ScenarioResult, type SimulatePointer, type ScenarioSource, type SimulateRequest } from "@/lib/contract";
+import { compareClaims } from "@/lib/ai/article/compareClaims";
 import { access } from "node:fs/promises";
 import path from "node:path";
 import { readBody } from "@/lib/http";
@@ -58,6 +61,12 @@ export async function POST(req: Request) {
   if (!picked) picked = { result: await readMockScenario(MOCK_SCENARIO_ID), source: "mock" };
 
   const out = annotate(picked.result, picked.source);
+  // Article claims are only meaningful when the plan came from an article.
+  if (!body.claims?.length) out.claims = [];
+  else {
+    out.claims = compareClaims(body.claims, out);
+    out.mockSections = out.mockSections?.filter((k) => k !== "claims");
+  }
   if (picked.source !== "live_sim") {
     // Stored files are named after the result id (<id>.sim.json, mock <id>.json); see src/lib/scenarios.ts.
     const file = picked.source === "mock" ? `${MOCK_SCENARIO_ID}.json` : `${picked.result.id}.sim.json`;
@@ -69,11 +78,10 @@ export async function POST(req: Request) {
         mockSections: out.mockSections ?? [],
         isMock: out.isMock,
         matched: picked.source === "prebaked_sim",
+        ...(body.claims?.length ? { claims: out.claims } : {}),
       };
       return Response.json(pointer, { headers: { "X-Scenario-Source": picked.source } });
     }
   }
-  // Article claims are only meaningful when the plan came from an article.
-  if (!body.claims?.length) out.claims = [];
   return Response.json(out, { headers: { "X-Scenario-Source": picked.source } });
 }
