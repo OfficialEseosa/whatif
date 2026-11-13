@@ -1,8 +1,8 @@
 // POST /api/simulate  { edit, claims? } -> ScenarioResult   (owner: Raphael)
 //
 // Resolution order (falls through on any failure, never 5xx for a valid request):
-//   1. live sim at `${SIM_URL}/simulate` (if SIM_URL is set and answers in time)
-//   2. prebaked sim run public/scenarios/*.sim.json whose edit matches
+//   1. prebaked sim run public/scenarios/*.sim.json whose edit matches (instant)
+//   2. live sim at `${SIM_URL}/simulate` (if SIM_URL is set and answers in time)
 //   3. frontend mock public/scenarios/beltline-streetcar.json
 // The result carries `source` ("live_sim" | "prebaked_sim" | "mock") and `mockSections`;
 // the same source is in the `X-Scenario-Source` response header.
@@ -52,11 +52,10 @@ export async function POST(req: Request) {
   const [body, err] = await readBody(req, SimulateRequestSchema);
   if (err) return err;
 
-  let picked = await fromLiveSim(body);
-  if (!picked) {
-    const prebaked = await findPrebakedSim(body.edit);
-    if (prebaked) picked = { result: prebaked, source: "prebaked_sim" };
-  }
+  // A saved run of this exact edit answers instantly; only then is the live sim worth the wait.
+  const prebaked = await findPrebakedSim(body.edit);
+  let picked: { result: ScenarioResult; source: ScenarioSource } | null = prebaked ? { result: prebaked, source: "prebaked_sim" } : null;
+  if (!picked) picked = await fromLiveSim(body);
   // TODO(Raphael): the mock is always the streetcar scenario, whatever the edit says.
   if (!picked) picked = { result: await readMockScenario(MOCK_SCENARIO_ID), source: "mock" };
 
