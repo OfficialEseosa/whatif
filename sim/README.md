@@ -14,7 +14,8 @@ contract-shaped `ScenarioResult` JSON for the Next.js frontend.
 | `new_bus_route` | runs locally (`edits._new_bus`): road-routed between gazetteer stops, stops every 500 m, time = baseline car time x 1.3 + 20 s/stop, 15-min default headway, operating cost |
 | `new_rail_line` | runs locally (`edits.apply_new_line`): corridor geometry if given, else straight line at 18 km/h (streetcar) / 26 (light rail), streetcar capital benchmarks |
 | `change_frequency` | runs locally (`edits.apply_change_frequency`): headway of the named line's GTFS patterns, operating cost |
-| `brt_lane`, `close_road` | written in `edits.py` but **untested**; return 501 until `scenario.ENABLE_UNTESTED_EDITS = True` |
+| `brt_lane` | runs (`edits.apply_brt_lane`): lane removed on the listed roads (single-lane edges keep 70% capacity), BRT stations every 600 m along the longest chain of those roads, 22 km/h, 10-min default headway, BRT capital benchmarks |
+| `close_road` | runs (`edits.apply_close_road`): closed edges cost 1e6 s; background traffic on them is rerouted between each stretch's ends, or dropped when the box has no detour (stated in the result). Commuters whose home or work street is itself closed are counted, kept at their baseline trip and left out of the totals |
 | others | 501 |
 
 Stops outside the box, or fewer than two stops, raise `edits.EditError` -> HTTP 422 with a plain message.

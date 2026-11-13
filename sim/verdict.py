@@ -202,7 +202,7 @@ def assess(base, prun, edit, line, riders_on_line, metrics_b, metrics_p, roads, 
                         + f", or ${hh_yr['low']:.2f}-{hh_yr['high']:.2f} per Fulton+DeKalb household per year. ")
         cut = int(prun.asg.cut_off.sum()) if getattr(prun.asg, "cut_off", None) is not None else 0
         if cut:
-            cost_txt += f"{jobs[prun.asg.cut_off].sum():,.0f} commuters have no drive route left. "
+            cost_txt += f"{jobs[prun.asg.cut_off].sum():,.0f} commuters start or end on a closed road and are left out of these totals. "
         summary = (
             f"The model measured work commutes only ({metrics_b['populationModeled']:,} people who work in the study "
             f"box; no school, errand or off-peak trips). Total commute time {'falls' if hours > 0 else 'rises'} by "
@@ -242,7 +242,7 @@ def assess(base, prun, edit, line, riders_on_line, metrics_b, metrics_p, roads, 
                                  f"(max +{slowed[0]['delayDeltaMin'] * 60:.0f} s on {nm(slowed, 1)}): {nm(slowed)}. "
                                  if slowed else
                                  f"No road segment gets >= {SLOWED_ROAD_MIN * 60:.0f} s slower per trip. ") +
-                                (f"Edited roads (lane removed): peak v/c {min(r['vcBaseline'] for r in ed):.2f}-"
+                                (f"Edited roads ({"closed" if edit.get("type") == "close_road" else "lane removed"}): peak v/c {min(r['vcBaseline'] for r in ed):.2f}-"
                                  f"{max(r['vcBaseline'] for r in ed):.2f} -> {min(r['vcProposed'] for r in ed):.2f}-"
                                  f"{max(r['vcProposed'] for r in ed):.2f}." if ed else ""),
                       "zone": "spillover", "roadIds": [r["roadId"] for r in (slowed or ed)][:20]})

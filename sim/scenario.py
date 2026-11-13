@@ -261,9 +261,9 @@ def apply_extend_line(base, edit):
     return td, cap, line, notes, {pi for pi, p in enumerate(td.patterns) if p.route_id == route_id}
 
 
-SUPPORTED_TYPES = ("extend_line", "new_rail_line", "new_bus_route", "change_frequency")
-# brt_lane / close_road are implemented in edits.py but untested; they return 501 until enabled.
-ENABLE_UNTESTED_EDITS = False
+SUPPORTED_TYPES = ("extend_line", "new_rail_line", "new_bus_route", "change_frequency", "brt_lane", "close_road")
+# Switch for brt_lane / close_road (False -> HTTP 501).
+ENABLE_UNTESTED_EDITS = True
 
 
 def apply_edit(base, edit) -> dict:
@@ -323,8 +323,13 @@ def run_scenario(edit: dict, scen_id: str, title: str | None = None, n_sample=ex
         riders_new = 0.0
     cut = run.asg.cut_off
     if cut is not None and cut.any():
-        notes.append(f"{base.dem.od.jobs.values[cut].sum():,.0f} commuters have no drive route without the closed "
-                     f"roads; they keep a {run.asg.drive_min[cut].min():,.0f}+ min drive time (so they switch mode).")
+        # Commuters whose home or work street is itself closed have no drive route in the model
+        # (a zone has one door). They are counted, and left out of the time and mode changes:
+        # their proposed trip is set equal to their baseline trip.
+        run.asg.drive_min[cut] = base.run.asg.drive_min[cut]
+        run.p_transit[cut] = base.run.p_transit[cut]
+        notes.append(f"{base.dem.od.jobs.values[cut].sum():,.0f} commuters start or end on a closed road and have no "
+                     f"other modeled door; they are left out of the time and mode changes (kept at their baseline trip).")
     edit_out = copy.deepcopy(edit)
     edit_out["assumptions"] = list(edit.get("assumptions") or []) + notes
     res = export.build_result(scen_id, title or edit["name"], edit_out, base, run, line, n_sample=n_sample,

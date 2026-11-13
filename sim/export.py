@@ -17,7 +17,7 @@ from dataclasses import dataclass
 import numpy as np
 
 import config
-from assign import DRIVE_TERMINAL_MIN, trace_path
+from assign import CLOSED_COST_S, DRIVE_TERMINAL_MIN, trace_path
 from contract import CONTRACT_VERSION, ScenarioResult
 import display as dsp
 from transit import trace
@@ -269,6 +269,10 @@ def road_effects(net, base_run, prop_run):
     vp = prop_run.asg.vc if prop_run is not None else vb
     tb = base_run.asg.time_s
     tp = prop_run.asg.time_s if prop_run is not None else tb
+    shut = tp >= CLOSED_COST_S * 0.5        # closed edges: no traffic, and no per-trip delay to report
+    if shut.any():
+        vp = np.where(shut, 0.0, vp)
+        tp = np.where(shut, tb, tp)
     m = e.highway.isin(ROAD_EFFECT_CLASSES).values
     df = e.loc[m, ["way_id", "oneway"]].assign(vb=vb[m], vp=vp[m], dt=(tp - tb)[m])
     out = []
@@ -416,6 +420,7 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
     btrips = _display_cache(base, router)["btrips"].setdefault((n_sample, seed), {})
 
     agents = []
+    cut = getattr(prun.asg, "cut_off", None)
     for i in range(n_sample):
         pi = int(s.pair[i])
         trips = []
@@ -424,6 +429,8 @@ def build_result(scen_id, title, edit, base, prop_run=None, line=None, n_sample=
         s.depart[i] = max(0.0, s.depart[i] - 60.0 * float(b_min))  # sampled arrival -> departure
         for run in (brun, prun):
             tr = btrips.get(i) if run is brun else None   # baseline trips never change: drawn once
+            if run is not brun and cut is not None and cut[pi]:
+                tr = trips[0]                             # no modeled door off the closed road: baseline trip kept
             if tr is None and s.u[i] < run.p_transit[pi]:
                 tr = transit_trip(dem, run, pi, s.home[i], s.work[i], s.depart[i], router)
             if tr is None:
