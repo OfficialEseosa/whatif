@@ -3,6 +3,7 @@ import { clock } from "@/lib/format";
 import { useStore, type Horizon } from "@/lib/store";
 import { PauseIcon, PlayIcon } from "./icons";
 import { useUi } from "./uiStore";
+import { PLAYBACK_SPEEDS, stepSpeed } from "@/hooks/useClock";
 
 const HORIZONS: { id: Horizon; label: string }[] = [
   { id: "opening", label: "Opening day" },
@@ -15,8 +16,18 @@ export function TimeScrubber() {
   const open = useUi((s) => s.timeOpen);
   if (!open) return null;
   return (
-    <div className="timestrip">
+    <div
+      className="timestrip"
+      onKeyDown={(e) => {
+        // - and + step the speed while focus is inside the strip (the range keeps its arrow keys).
+        if (e.key === "-" || e.key === "+" || e.key === "=") {
+          e.preventDefault();
+          stepSpeed(e.key === "-" ? -1 : 1);
+        }
+      }}
+    >
       <PlayButton />
+      <Speed />
       <Clock />
       <Range />
       <Horizons />
@@ -30,6 +41,34 @@ function PlayButton() {
     <button className="icon-btn" onClick={() => useStore.getState().set({ playing: !playing })} aria-label={playing ? "Pause" : "Play"}>
       {playing ? <PauseIcon /> : <PlayIcon />}
     </button>
+  );
+}
+
+const SPEED_LABEL: Record<number, string> = {
+  10: "10 simulated seconds per second",
+  30: "30 simulated seconds per second",
+  60: "1 simulated minute per second",
+  300: "5 simulated minutes per second",
+};
+
+/** Playback speed; changing it only changes how fast store.time advances. */
+function Speed() {
+  const speed = useStore((s) => s.playbackSpeed);
+  return (
+    <div className="seg seg-sm" role="group" aria-label="Playback speed">
+      {PLAYBACK_SPEEDS.map((s) => (
+        <button
+          key={s}
+          className="seg-btn num"
+          aria-pressed={speed === s}
+          aria-label={`${s}×, ${SPEED_LABEL[s]}`}
+          title={SPEED_LABEL[s]}
+          onClick={() => useStore.getState().set({ playbackSpeed: s })}
+        >
+          {s}×
+        </button>
+      ))}
+    </div>
   );
 }
 

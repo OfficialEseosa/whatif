@@ -177,6 +177,8 @@ type State = {
   attribution: Attribution;
   time: number;
   playing: boolean;
+  /** Simulated seconds per real second while playing (see PLAYBACK_SPEEDS in src/hooks/useClock.ts). */
+  playbackSpeed: number;
   horizon: Horizon;
   tab: ResultsTab;
   activeHistoryId: string | null;
@@ -247,6 +249,7 @@ export const useStore = create<State & Actions>((set) => ({
   attribution: { google: false, text: "" },
   time: 6600,
   playing: true,
+  playbackSpeed: 30,
   horizon: "opening",
   tab: "verdict",
   activeHistoryId: null,
