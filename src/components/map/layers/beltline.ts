@@ -2,17 +2,18 @@
 import { PathLayer } from "@deck.gl/layers";
 import type { BeltlineSegment, Network } from "@/lib/contract";
 import { MAP_COLORS } from "../colors";
-import { overlayProps } from "./common";
+import { LIFT_M, lift, terrainProps } from "./common";
 
 export function beltlineLayer(network: Network, photoreal: boolean) {
   return new PathLayer<BeltlineSegment>({
     id: "beltline",
     data: network.beltline,
-    getPath: (d) => d.path,
+    getPath: (d) => lift(d.path, photoreal ? LIFT_M.beltline : 0),
     getColor: MAP_COLORS.beltline,
     getWidth: 2,
     widthUnits: "pixels",
     capRounded: true,
-    ...overlayProps(photoreal),
+    updateTriggers: { getPath: photoreal },
+    ...terrainProps(photoreal),
   });
 }

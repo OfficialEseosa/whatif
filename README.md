@@ -42,10 +42,12 @@ Shared helper `src/lib/http.ts` is tiny; coordinate before changing it.
 
 `src/lib/contract.ts` is the single source of truth: zod schemas + inferred TS types for `ScenarioEdit`, `ScenarioResult` (line, metrics, verdict, impact, agents with TripsLayer-shaped trips, road and tract effects, who pays, claims, personas, look-ahead), `Network`, `HistoryEvent`, `GazetteerPlace`, and the request/response types of every API route. The Python sim mirrors it in `sim/contract.py`. Conventions: coordinates are `[lng, lat]`; trip timestamps are seconds after 6:00 AM; shares are 0..1.
 
+Contract 1.1.0 added two **optional** `ScenarioResult` fields: `source` and `mockSections: string[]` (keys from `MOCK_SECTION_KEYS`, e.g. `"verdict.headline"`, `"verdict.tests.cost_per_rider"`, `"personas"`; a key covers everything under it). The UI marks those sections "mock" when the result is sim output. If a sim result doesn't send `mockSections`, the route infers them from `impact.notes` (`SIM_DEFAULT_MOCK_SECTIONS` in `src/lib/scenarios.ts`). At boot the map shows `baseline.sim.json` if it exists, else the mock.
+
 API routes (all validate input and output with the contract):
 
 - `POST /api/plan` `{ text, mode: "prompt" | "article" | "fix" }` → `{ edit, claims?, candidates?, isMock }` — `TODO(Samuel)` in `src/lib/ai/plan.ts`
-- `POST /api/simulate` `{ edit, claims? }` → `ScenarioResult` — `TODO(Raphael)` in the route
+- `POST /api/simulate` `{ edit, claims? }` → `ScenarioResult`. Resolution order, falling through on any failure: live sim at `${SIM_URL}/simulate` (40 s timeout) → prebaked `public/scenarios/*.sim.json` whose edit matches (ignoring `name`/`assumptions`) → the mock. The response carries `source` (`live_sim` | `prebaked_sim` | `mock`, also in the `X-Scenario-Source` header) and `mockSections`.
 - `POST /api/persona` `{ scenarioId, personaId, messages }` → `{ personaId, reply, isMock }` — `TODO(Samuel)` in `src/lib/ai/persona.ts`
 - `GET /api/map-session` → Google 2D tiles session token (404 without a key)
 
@@ -65,5 +67,9 @@ deck.gl only (no MapLibre/Mapbox), client-only via `next/dynamic` (`ssr: false`)
 - **Analysis**: Google Map Tiles 2D (dark style) when `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is set; otherwise the **keyless fallback**: the CSS background plus real OSM roads drawn as `PathLayer`s.
 - **Photoreal 3D**: Google Photorealistic 3D Tiles via `Tile3DLayer` when the key is set; otherwise the keyless map, tilted.
 - Google attribution is shown whenever Google tiles are on screen; otherwise "© OpenStreetMap contributors".
+
+- **Photoreal overlays** use deck.gl `TerrainExtension` (offset mode for paths/points, drape for fills) with the 3D tiles as terrain, so buildings occlude them. The camera target is lifted 270 m (ellipsoidal ground height) so steep close-ups stay above the mesh. Free orbit: right-drag or Ctrl-drag rotates/tilts up to 85°; the compass resets north.
+- **Vehicles**: MARTA trains and streetcars run along the rail (and the proposed line once built), positioned from headway and speed and tied to the scrubber. Headways/speeds are **placeholders** (`VEHICLE_SERVICE` in `layers/vehicles.ts`) until the sim exports GTFS headways.
+- **Underground**: `network.json` rail carries OSM `tunnel`/`bridge`/`layer` tags (optional `RailLine.structures` / `layers`). Tunnels are dashed; the Underground toggle fades the 2D basemap, or in photoreal hides the 3D tiles and shows tunnels at approximate depth over a flat road wireframe.
 
 Build it: `/api/plan` → pipeline steps → `/api/simulate` → the line draws → agents switch from baseline to proposed trips → panels fill. The scrubber drives `TripsLayer.currentTime`; history cards switch on overlays; Year 5/10 fades at-risk agents and shows the rent-pressure zone.

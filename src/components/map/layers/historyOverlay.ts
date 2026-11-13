@@ -2,13 +2,12 @@
 import { PathLayer, PolygonLayer } from "@deck.gl/layers";
 import type { HistoryOverlay, LngLat, Network, OverlayFeature } from "@/lib/contract";
 import { MAP_COLORS, withAlpha } from "../colors";
-import { overlayProps } from "./common";
+import { LIFT_M, lift, terrainProps } from "./common";
 
 export function historyOverlayLayers(network: Network, overlay: HistoryOverlay, photoreal: boolean) {
   const feats = network.overlays.filter((f) => f.overlay === overlay);
   const polys = feats.filter((f) => f.geometry.type === "polygon");
   const paths = feats.filter((f) => f.geometry.type === "path");
-  const onTerrain = overlayProps(photoreal);
   return [
     new PolygonLayer<OverlayFeature>({
       id: `history-${overlay}-polygons`,
@@ -19,18 +18,19 @@ export function historyOverlayLayers(network: Network, overlay: HistoryOverlay, 
       lineWidthMinPixels: 1.5,
       stroked: true,
       pickable: true,
-      ...onTerrain,
+      ...terrainProps(photoreal, "drape"),
     }),
     new PathLayer<OverlayFeature>({
       id: `history-${overlay}-paths`,
       data: paths,
-      getPath: (d) => (d.geometry as { path: LngLat[] }).path,
+      getPath: (d) => lift((d.geometry as { path: LngLat[] }).path, photoreal ? LIFT_M.history : 0),
       getColor: withAlpha(MAP_COLORS.history, 200),
       getWidth: overlay === "county" ? 3 : 6,
       widthUnits: "pixels",
       capRounded: true,
       pickable: true,
-      ...onTerrain,
+      updateTriggers: { getPath: photoreal },
+      ...terrainProps(photoreal),
     }),
   ];
 }

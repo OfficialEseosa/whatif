@@ -215,3 +215,14 @@ button.card:hover:not(:disabled) { background: var(--surface-hover); }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* ---------- provenance ---------- */
+.source-mock { color: var(--fair); }
+.source-live_sim { color: var(--good); }
+.source-prebaked_sim { color: var(--blue); }
+.badge-mock-section { color: var(--fair); margin-left: 6px; }
+.is-mock-section { outline: 1px dashed color-mix(in srgb, var(--fair) 60%, transparent); outline-offset: 4px; border-radius: var(--radius-card); }
+.bar-neutral { background: #55595f; }
+.nav-pill { height: 40px; padding: 0 16px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+.nav-pill:hover { background: #33363b; }
+.nav-pill[aria-pressed="true"] { color: var(--blue); background: #2b3a55; }

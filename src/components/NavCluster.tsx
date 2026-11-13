@@ -7,6 +7,7 @@ const HAS_KEY = !!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 /** Camera controls: home, 2D/3D, zoom, compass. */
 export function NavCluster() {
   const view = useStore((s) => s.view);
+  const underground = useStore((s) => s.underground);
   const bearing = useStore((s) => s.live.bearing);
   const { set, flyTo } = useStore.getState();
   const is3d = view === "photoreal";
@@ -20,6 +21,14 @@ export function NavCluster() {
 
   return (
     <div className="nav" role="group" aria-label="Camera">
+      <button
+        className="nav-pill surface"
+        aria-pressed={underground}
+        onClick={() => set({ underground: !underground })}
+        title="Fade the surface to show MARTA tunnels and trains below ground"
+      >
+        Underground
+      </button>
       <button className="icon-btn surface" aria-label="Fly to Atlanta" title="Fly to Atlanta" onClick={() => flyTo(INITIAL_CAMERA, 1600)}>
         <HomeIcon />
       </button>
@@ -39,7 +48,7 @@ export function NavCluster() {
           <PlusIcon />
         </button>
       </div>
-      <button className="icon-btn surface compass" aria-label="Face north" title="Face north" onClick={() => flyTo({ bearing: 0 }, 500)}>
+      <button className="icon-btn surface compass" aria-label="Face north" title="Face north (right-drag or Ctrl-drag the map to rotate and tilt)" onClick={() => flyTo({ bearing: 0 }, 500)}>
         <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true" style={{ transform: `rotate(${-bearing}deg)` }}>
           <path d="M13 2.5 17 13H9l4-10.5Z" fill="var(--poor)" />
           <path d="M13 23.5 9 13h8l-4 10.5Z" fill="var(--text)" opacity="0.85" />

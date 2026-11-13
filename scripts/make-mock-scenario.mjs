@@ -134,8 +134,11 @@ for (const w of ways) {
   } else if (t.railway === "rail") {
     id = "freight"; name = "Freight rail (CSX / Norfolk Southern)"; kind = "freight";
   } else continue;
-  if (!railGroups.has(id)) railGroups.set(id, { id, name, kind, paths: [] });
-  railGroups.get(id).paths.push(simplify(geom(w), 0.004).map(r5));
+  if (!railGroups.has(id)) railGroups.set(id, { id, name, kind, paths: [], structures: [], layers: [] });
+  const g = railGroups.get(id);
+  g.paths.push(simplify(geom(w), 0.004).map(r5));
+  g.structures.push(t.tunnel && t.tunnel !== "no" && t.tunnel !== "building_passage" ? "tunnel" : t.bridge && t.bridge !== "no" ? "bridge" : "grade");
+  g.layers.push(parseInt(t.layer, 10) || 0);
 }
 const rail = [...railGroups.values()].sort((a, b) => a.id.localeCompare(b.id));
 
@@ -567,6 +570,7 @@ const scenario = {
   title: edit.name,
   edit,
   isMock: true,
+  source: "mock",
   generatedAt: "2026-11-13T00:00:00.000Z",
   timeWindow: { startSec: 0, endSec: 14400 },
   line: { path: linePath, stops: lineStops },

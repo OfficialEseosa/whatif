@@ -1,10 +1,12 @@
 import type { Lookahead } from "@/lib/contract";
+import { MockTag } from "../MockTag";
 
-export function LookaheadCard({ lookahead, horizon }: { lookahead: Lookahead; horizon: "year5" | "year10" }) {
+export function LookaheadCard({ lookahead, horizon, mock }: { lookahead: Lookahead; horizon: "year5" | "year10"; mock: boolean }) {
   const h = lookahead[horizon];
   const last = lookahead.lastTime;
   return (
-    <div className="stack-sm">
+    <div className={`stack-sm ${mock ? "is-mock-section" : ""}`}>
+      <MockTag show={mock} what="the look-ahead" />
       <strong>
         {horizon === "year5" ? "Year 5" : "Year 10"}: {h.householdsAtRisk.low.toLocaleString("en-US")}–
         {h.householdsAtRisk.high.toLocaleString("en-US")} renter households at risk

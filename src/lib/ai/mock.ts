@@ -35,6 +35,8 @@ export const STREETCAR_STOP_IDS = [
   "ponce_city_market",
 ];
 
+export const EDGEWOOD_ROAD_IDS = ["w1378033903", "w1390663415", "w243830599", "w44062172", "w44062182", "w44163840", "w905997420", "w9272974"];
+
 export function cannedStreetcarEdit(): ScenarioEdit {
   return {
     type: "extend_line",
@@ -44,6 +46,9 @@ export function cannedStreetcarEdit(): ScenarioEdit {
     baseLineId: "atlanta_streetcar",
     tech: "streetcar",
     headwayMin: 10,
+    // Edgewood Ave OSM ways (east of the loop to the Beltline) that lose a lane. Same list the mock
+    // generator derives, so this canned edit matches the prebaked sim run exactly.
+    roadIds: EDGEWOOD_ROAD_IDS,
     lanesRemoved: 1,
     assumptions: ["Canned edit: the plan parser is not wired to Claude yet."],
   };

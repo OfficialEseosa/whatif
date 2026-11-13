@@ -7,12 +7,13 @@ import type { Tileset3D } from "@loaders.gl/tiles";
 
 const ROOT = "https://tile.googleapis.com/v1/3dtiles/root.json";
 
-export function photorealLayer(key: string, onCredits: (credits: string) => void) {
+export function photorealLayer(key: string, onCredits: (credits: string) => void, visible = true) {
   return new Tile3DLayer({
     id: "google-photoreal-3d",
     data: ROOT,
     loadOptions: { fetch: { headers: { "X-GOOG-API-KEY": key } } },
     operation: "terrain+draw",
+    visible,
     onTilesetLoad: (tileset: Tileset3D) => {
       tileset.options.onTraversalComplete = (selected) => {
         const credits = new Set<string>();

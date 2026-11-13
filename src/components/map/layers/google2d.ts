@@ -6,13 +6,14 @@
 import { TileLayer } from "@deck.gl/geo-layers";
 import { BitmapLayer } from "@deck.gl/layers";
 
-export function google2dLayer(session: string, key: string) {
+export function google2dLayer(session: string, key: string, opacity = 1) {
   return new TileLayer({
     id: "google-2d",
     data: `https://tile.googleapis.com/v1/2dtiles/{z}/{x}/{y}?session=${encodeURIComponent(session)}&key=${encodeURIComponent(key)}`,
     minZoom: 0,
     maxZoom: 22,
     tileSize: 256,
+    opacity,
     renderSubLayers: (props) => {
       const { boundingBox } = props.tile;
       return new BitmapLayer(props, {

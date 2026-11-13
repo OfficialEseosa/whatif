@@ -34,6 +34,8 @@ export function clock(sec: number): string {
 }
 
 export const pct = (x: number) => `${Math.round(x * 100)}%`;
+/** Percent with one decimal: 0.1204 -> "12.0%". */
+export const pct1 = (x: number) => `${(x * 100).toFixed(1)}%`;
 
 /** 33.762, -84.374 -> 33°45'43"N 84°22'26"W. */
 export function dms(lat: number, lng: number): string {

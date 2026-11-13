@@ -1,6 +1,8 @@
 "use client";
 import { useBuildFlow } from "@/hooks/useBuildFlow";
 import { useStore, type ResultsTab } from "@/lib/store";
+import { isMockSection } from "@/lib/provenance";
+import type { LngLat } from "@/lib/contract";
 import { CloseIcon } from "../icons";
 import { PipelineOverlay } from "../map/PipelineOverlay";
 import { VerdictPane } from "./VerdictPane";
@@ -27,6 +29,9 @@ export function ResultsPanel() {
   const { set, openChat } = useStore.getState();
   const build = useBuildFlow();
   const ready = scenario && (phase === "done" || phase === "building");
+  const mk = (key: string) => isMockSection(scenario, key);
+  const bbox = useStore((s) => s.network?.bbox);
+  const inBox = (p: LngLat) => !bbox || (p[0] >= bbox[0] && p[0] <= bbox[2] && p[1] >= bbox[1] && p[1] <= bbox[3]);
 
   if (phase === "idle" || (phase === "error" && !scenario)) return null;
   if (!open)
@@ -59,17 +64,21 @@ export function ResultsPanel() {
           </div>
           <div className="scroll pane">
             {tab === "verdict" ? (
-              <VerdictPane verdict={scenario.verdict} claims={scenario.claims} onAlternative={(alt) => alt.edit && build(alt.edit)} />
+              <VerdictPane verdict={scenario.verdict} claims={scenario.claims} onAlternative={(alt) => alt.edit && build(alt.edit)} isMock={mk} />
             ) : tab === "impact" ? (
-              <ImpactPane impact={scenario.impact} metrics={scenario.metrics} />
+              <ImpactPane impact={scenario.impact} metrics={scenario.metrics} isMock={mk} />
             ) : tab === "whoPays" ? (
-              <WhoPaysPane whoPays={scenario.whoPays} highlightZone={highlightZone} onHighlight={(z) => set({ highlightZone: z })} />
+              <WhoPaysPane whoPays={scenario.whoPays} highlightZone={highlightZone} onHighlight={(z) => set({ highlightZone: z })} isMock={mk} />
             ) : (
               <TownHallPane
                 personas={scenario.personas}
+                mock={mk("personas")}
                 onSelect={(p) => {
                   openChat(p.id);
-                  set({ camera: { longitude: p.home[0], latitude: p.home[1], zoom: 15, pitch: 50, bearing: -20, transitionDuration: 1200 } });
+                  // Persona agentIds may not exist in this run (sim output copies mock personas): fall back to persona.home.
+                  const agent = p.agentId ? scenario.agents.find((a) => a.id === p.agentId) : undefined;
+                  const target = agent && inBox(agent.home) ? agent.home : p.home;
+                  if (inBox(target)) set({ camera: { longitude: target[0], latitude: target[1], zoom: 15, pitch: 50, bearing: -20, transitionDuration: 1200 } });
                 }}
               />
             )}

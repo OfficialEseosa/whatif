@@ -10,6 +10,9 @@ const GROUPS: { title: string; items: [string, RGBA][] }[] = [
       ["MARTA rail", MAP_COLORS.rail],
       ["Streetcar", MAP_COLORS.streetcar],
       ["Beltline trail", MAP_COLORS.beltline],
+      ["Rail in tunnel (dashed)", MAP_COLORS.tunnel],
+      ["MARTA train*", MAP_COLORS.martaTrain],
+      ["Streetcar*", MAP_COLORS.streetcarVehicle],
     ],
   },
   {
@@ -48,6 +51,7 @@ export function Legend() {
           </ul>
         </section>
       ))}
+      <p className="small muted">* vehicles use placeholder headways</p>
     </div>
   );
 }
