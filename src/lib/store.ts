@@ -62,6 +62,8 @@ export type RunRecord = {
   result: ScenarioResult | null;
   /** The server has no simulation for this edit: the run stops after Route commuters, nothing is scored. */
   notSimulated: boolean;
+  /** Why: the simulator can't run this kind of plan ("unsupported", with its message) or none is online ("offline"). */
+  notSimulatedReason: { reason: "unsupported" | "offline"; message?: string } | null;
   error: { step: string; message: string } | null;
   cancelled: boolean;
 };

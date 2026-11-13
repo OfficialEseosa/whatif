@@ -6,7 +6,7 @@ import { isMockSection, scenarioSource } from "@/lib/provenance";
 import type { LngLat, ScenarioSource } from "@/lib/contract";
 import { ChevronDownIcon, CloseIcon } from "../icons";
 import { focusComposer, useUi, type UiTab } from "../uiStore";
-import { editLine, planLine } from "../run/runFormat";
+import { editLine, notSimulatedText, planLine } from "../run/runFormat";
 import { Alternatives, ClaimCheckList, TestRows, VERDICT_GRADE, VERDICT_WORD } from "./VerdictPane";
 import { ImpactPane } from "./ImpactPane";
 import { WhoPaysPane } from "./WhoPaysPane";
@@ -159,6 +159,7 @@ function NotSimulated({ run }: { run: RunRecord }) {
   const network = useStore((s) => s.network);
   const set = useStore((s) => s.set);
   const e = run.edit!;
+  const why = notSimulatedText(run);
   const tryStreetcar = () => {
     set({ text: DEFAULT_TEXT.prompt });
     requestAnimationFrame(focusComposer);
@@ -167,7 +168,7 @@ function NotSimulated({ run }: { run: RunRecord }) {
     <aside className="surface results" aria-label="Results">
       <header className="results-head">
         <div className="grow">
-          <h2 className="verdict-word">Not simulated yet</h2>
+          <h2 className="verdict-word">Not simulated</h2>
           <p className="results-title">{e.name}</p>
         </div>
         <button className="icon-btn" aria-label="Close results" onClick={() => set({ resultsOpen: false })}>
@@ -177,6 +178,7 @@ function NotSimulated({ run }: { run: RunRecord }) {
       <p className="verdict-headline">
         {e.type === "change_frequency" ? `${editLine(e, network)}.` : `${planLine(e)}. ${editLine(e, network)}.`}
       </p>
+      <p className="verdict-headline">{why.reason}</p>
       <div className="results-foot">
         {/* The only plan with a saved simulation run today (public/scenarios/beltline-streetcar.sim.json). */}
         <button className="btn" onClick={tryStreetcar}>

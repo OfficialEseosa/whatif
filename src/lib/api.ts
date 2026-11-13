@@ -10,6 +10,7 @@ import {
   type PlanRequest,
   type ScenarioResult,
   type ScenarioSource,
+  type SimulatePointer,
   type SimulateRequest,
 } from "@/lib/contract";
 import type { ZodType } from "zod";
@@ -31,6 +32,9 @@ const post = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
+/** Why nothing was simulated for an edit (see SimulatePointer.notSimulated). */
+export type NotSimulated = NonNullable<SimulatePointer["notSimulated"]>;
+
 /** Timings of one /api/simulate call, for the run panel. */
 export type SimulateTiming = {
   /** The POST to /api/simulate. */
@@ -47,12 +51,15 @@ async function simulate(req: SimulateRequest): Promise<{ result: ScenarioResult;
 async function simulate(
   req: SimulateRequest,
   opts: { skipMock: true },
-): Promise<{ result: ScenarioResult | null; source: ScenarioSource; timing: SimulateTiming }>;
+): Promise<{ result: ScenarioResult | null; source: ScenarioSource; timing: SimulateTiming; notSimulated?: NotSimulated }>;
 /**
  * `skipMock`: when the server has no simulation for this edit it points at the placeholder scenario
  * (always the streetcar). Return `result: null` instead of loading another plan's numbers.
  */
-async function simulate(req: SimulateRequest, opts?: { skipMock: true }): Promise<{ result: ScenarioResult | null; source: ScenarioSource; timing: SimulateTiming }> {
+async function simulate(
+  req: SimulateRequest,
+  opts?: { skipMock: true },
+): Promise<{ result: ScenarioResult | null; source: ScenarioSource; timing: SimulateTiming; notSimulated?: NotSimulated }> {
   const t0 = performance.now();
   const res = await fetch("/api/simulate", post(req));
   const json = await res.json().catch(() => null);
@@ -61,7 +68,8 @@ async function simulate(req: SimulateRequest, opts?: { skipMock: true }): Promis
   if (json && typeof json === "object" && "scenarioUrl" in json) {
     const ptr = SimulatePointerSchema.safeParse(json);
     if (!ptr.success) throw new Error("/api/simulate: pointer does not match the contract");
-    if (opts?.skipMock && ptr.data.source === "mock") return { result: null, source: "mock" as const, timing: { routeMs, file: null } };
+    if (opts?.skipMock && ptr.data.source === "mock")
+      return { result: null, source: "mock" as const, timing: { routeMs, file: null }, notSimulated: ptr.data.notSimulated ?? { reason: "offline" } };
     const t1 = performance.now();
     const fileRes = await fetch(ptr.data.scenarioUrl);
     if (!fileRes.ok) throw new Error(`${ptr.data.scenarioUrl}: HTTP ${fileRes.status}`);
@@ -88,7 +96,7 @@ async function simulate(req: SimulateRequest, opts?: { skipMock: true }): Promis
     throw new Error("/api/simulate: response does not match the contract");
   }
   const source: ScenarioSource = parsed.data.source ?? (parsed.data.isMock ? "mock" : "live_sim");
-  if (opts?.skipMock && source === "mock") return { result: null, source, timing: { routeMs, file: null } };
+  if (opts?.skipMock && source === "mock") return { result: null, source, timing: { routeMs, file: null }, notSimulated: { reason: "offline" } };
   return { result: parsed.data, source, timing: { routeMs, file: null } };
 }
 

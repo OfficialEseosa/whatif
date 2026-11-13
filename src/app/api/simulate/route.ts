@@ -1,12 +1,14 @@
 // POST /api/simulate  { edit, claims? } -> ScenarioResult   (owner: Raphael)
 //
-// Resolution order (falls through on any failure, never 5xx for a valid request):
+// Resolution order:
 //   1. prebaked sim run public/scenarios/*.sim.json whose edit matches (instant)
 //   2. live sim at `${SIM_URL}/simulate` (if SIM_URL is set and answers in time)
-//   3. frontend mock public/scenarios/beltline-streetcar.json
+//   3. nothing simulated it: a pointer to the placeholder file with `notSimulated` (reason "offline" when
+//      SIM_URL is unset, "unsupported" when the sim says it can't run this plan). A live failure or
+//      timeout is an error response (502/503/504), never a silent swap to other numbers.
 // The result carries `source` ("live_sim" | "prebaked_sim" | "mock") and `mockSections`;
 // the same source is in the `X-Scenario-Source` response header.
-// Stored results (2 and 3, or a prebaked file the sim served) come back as a small SimulatePointer
+// Stored results (1 and 3, or a prebaked file the sim served) come back as a small SimulatePointer
 // to the static file instead of the body: Vercel caps function responses at 4.5 MB.
 // When the request carries article claims, `claims` is recomputed from the chosen result
 // (compareClaims), so the article check always matches the numbers on screen; a pointer carries them.
@@ -14,38 +16,83 @@ import { ScenarioResultSchema, SimulateRequestSchema, type ScenarioResult, type 
 import { compareClaims } from "@/lib/ai/article/compareClaims";
 import { access } from "node:fs/promises";
 import path from "node:path";
-import { readBody } from "@/lib/http";
+import { gzipSync } from "node:zlib";
+import { apiError, readBody } from "@/lib/http";
 import { MOCK_SCENARIO_ID, annotate, findPrebakedSim, readMockScenario } from "@/lib/scenarios";
 
-export const maxDuration = 60;
-const LIVE_TIMEOUT_MS = 40_000; // live runs take ~13 s (sim/README.md)
+// A live run of the full region takes tens of seconds; allow the function up to 90 s (Node runtime).
+export const maxDuration = 90;
+const LIVE_TIMEOUT_MS = 80_000;
+/** Refuse absurd live responses (a full result is ~6 MB of JSON). */
+const MAX_LIVE_BYTES = 40_000_000;
+/** Above this, the JSON is gzipped here: Vercel caps function responses at 4.5 MB. */
+const GZIP_OVER_BYTES = 3_000_000;
 
-async function fromLiveSim(body: SimulateRequest): Promise<{ result: ScenarioResult; source: ScenarioSource } | null> {
+type Live =
+  | { kind: "ok"; result: ScenarioResult; source: ScenarioSource }
+  | { kind: "unsupported"; message?: string }
+  | { kind: "error"; status: number; message: string };
+
+/** The sim's own explanation from an error body ({detail} from FastAPI, or {error}). */
+async function simMessage(res: Response): Promise<string | undefined> {
+  const text = await res.text().catch(() => "");
+  try {
+    const j = JSON.parse(text) as { detail?: unknown; error?: unknown };
+    const m = typeof j.detail === "string" ? j.detail : typeof j.error === "string" ? j.error : undefined;
+    if (m) return m.slice(0, 300);
+  } catch {
+    // not JSON
+  }
+  return text.trim().slice(0, 300) || undefined;
+}
+
+/** Live sim at SIM_URL, or null when none is configured. Failures are reported, never swapped for other numbers. */
+async function fromLiveSim(body: SimulateRequest): Promise<Live | null> {
   const simUrl = process.env.SIM_URL;
   if (!simUrl) return null;
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (process.env.SIM_TOKEN) headers["X-Sim-Token"] = process.env.SIM_TOKEN;
+  let res: Response;
   try {
-    const res = await fetch(new URL("/simulate", simUrl), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(LIVE_TIMEOUT_MS),
-    });
-    if (!res.ok) {
-      console.warn(`[simulate] sim service returned ${res.status}; falling back`);
-      return null;
-    }
-    const parsed = ScenarioResultSchema.safeParse(await res.json().catch(() => null));
-    if (!parsed.success) {
-      console.warn("[simulate] sim result does not match the contract; falling back", parsed.error.issues.slice(0, 5));
-      return null;
-    }
-    // sim/main.py serves a matching prebaked file itself and says so in X-Sim-Source.
-    const source: ScenarioSource = res.headers.get("x-sim-source") === "prebaked" ? "prebaked_sim" : "live_sim";
-    return { result: parsed.data, source };
+    res = await fetch(new URL("/simulate", simUrl), { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(LIVE_TIMEOUT_MS) });
   } catch (e) {
-    console.warn(`[simulate] sim service unreachable (${e instanceof Error ? e.message : e}); falling back`);
-    return null;
+    const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+    console.warn(`[simulate] sim service ${timedOut ? "timed out" : "unreachable"} (${e instanceof Error ? e.message : e})`);
+    return timedOut
+      ? { kind: "error", status: 504, message: `The simulator did not finish within ${LIVE_TIMEOUT_MS / 1000} s.` }
+      : { kind: "error", status: 503, message: "The simulator is offline right now." };
   }
+  // 400/422: the sim can't place this edit; 501: plan type not implemented.
+  if (res.status === 400 || res.status === 422 || res.status === 501) return { kind: "unsupported", message: await simMessage(res) };
+  if (!res.ok) {
+    const m = await simMessage(res);
+    console.warn(`[simulate] sim service returned ${res.status}: ${m ?? ""}`);
+    return { kind: "error", status: 502, message: `The simulator failed (HTTP ${res.status})${m ? `: ${m}` : "."}` };
+  }
+  if (Number(res.headers.get("content-length") ?? 0) > MAX_LIVE_BYTES) return { kind: "error", status: 502, message: "The simulator's result is too large." };
+  const text = await res.text().catch(() => "");
+  if (text.length > MAX_LIVE_BYTES) return { kind: "error", status: 502, message: "The simulator's result is too large." };
+  let json: unknown = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    // handled below
+  }
+  const parsed = ScenarioResultSchema.safeParse(json);
+  if (!parsed.success) {
+    console.warn("[simulate] sim result does not match the contract", parsed.error.issues.slice(0, 5));
+    return { kind: "error", status: 502, message: "The simulator returned a result in the wrong format." };
+  }
+  // sim/main.py serves a matching prebaked file itself and says so in X-Sim-Source.
+  const source: ScenarioSource = res.headers.get("x-sim-source") === "prebaked" ? "prebaked_sim" : "live_sim";
+  return { kind: "ok", result: parsed.data, source };
+}
+
+/** JSON response, gzipped when large so a full live result fits under the platform's response cap. */
+function json(data: unknown, headers: Record<string, string>): Response {
+  const text = JSON.stringify(data);
+  if (text.length <= GZIP_OVER_BYTES) return Response.json(data, { headers });
+  return new Response(new Uint8Array(gzipSync(text)), { headers: { ...headers, "Content-Type": "application/json", "Content-Encoding": "gzip" } });
 }
 
 export async function POST(req: Request) {
@@ -55,8 +102,14 @@ export async function POST(req: Request) {
   // A saved run of this exact edit answers instantly; only then is the live sim worth the wait.
   const prebaked = await findPrebakedSim(body.edit);
   let picked: { result: ScenarioResult; source: ScenarioSource } | null = prebaked ? { result: prebaked, source: "prebaked_sim" } : null;
-  if (!picked) picked = await fromLiveSim(body);
-  // TODO(Raphael): the mock is always the streetcar scenario, whatever the edit says.
+  let notSimulated: SimulatePointer["notSimulated"];
+  if (!picked) {
+    const live = await fromLiveSim(body);
+    if (live?.kind === "ok") picked = { result: live.result, source: live.source };
+    else if (live?.kind === "error") return apiError(live.status, live.message);
+    else notSimulated = live?.kind === "unsupported" ? { reason: "unsupported", ...(live.message ? { message: live.message } : {}) } : { reason: "offline" };
+  }
+  // Nothing simulated this edit: point at the placeholder file, flagged so the UI shows the plan, not these numbers.
   if (!picked) picked = { result: await readMockScenario(MOCK_SCENARIO_ID), source: "mock" };
 
   const out = annotate(picked.result, picked.source);
@@ -78,9 +131,10 @@ export async function POST(req: Request) {
         isMock: out.isMock,
         matched: picked.source === "prebaked_sim",
         ...(body.claims?.length ? { claims: out.claims } : {}),
+        ...(notSimulated ? { notSimulated } : {}),
       };
       return Response.json(pointer, { headers: { "X-Scenario-Source": picked.source } });
     }
   }
-  return Response.json(out, { headers: { "X-Scenario-Source": picked.source } });
+  return json(out, { "X-Scenario-Source": picked.source });
 }

@@ -29,7 +29,7 @@ const article = check("POST /api/plan (article)", C.PlanResponseSchema, await po
 async function simulate(name, body) {
   const res = check(name, C.SimulateRouteResponseSchema, await post("/api/simulate", body));
   if (!("scenarioUrl" in res)) return check(`${name} result`, C.ScenarioResultSchema, res);
-  console.log(`     pointer -> ${res.scenarioUrl} (${JSON.stringify(res).length} bytes)`);
+  console.log(`     pointer -> ${res.scenarioUrl} (${JSON.stringify(res).length} bytes)${res.notSimulated ? ` notSimulated=${res.notSimulated.reason}` : ""}`);
   const file = check(`GET ${res.scenarioUrl}`, C.ScenarioResultSchema, await (await fetch(base + res.scenarioUrl)).json());
   return { ...file, source: res.source, mockSections: res.mockSections ?? file.mockSections, isMock: res.isMock ?? file.isMock, claims: body.claims?.length ? file.claims : [] };
 }

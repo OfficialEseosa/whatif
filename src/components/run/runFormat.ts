@@ -1,5 +1,6 @@
 /** Plain-word lines and formatting for the run panel. Presentation only. */
 import type { LngLat, Network, ScenarioEdit, ScenarioResult } from "@/lib/contract";
+import type { RunRecord } from "@/lib/store";
 import { scenarioSource } from "@/lib/provenance";
 
 const TECH_NOUN: Record<string, string> = {
@@ -114,4 +115,11 @@ export function routeLine(r: ScenarioResult): string {
 /** "Poor, 5 tests" */
 export function scoreLine(r: ScenarioResult): string {
   return `${cap(r.verdict.label)}, ${r.verdict.tests.length} tests`;
+}
+
+/** Plain reason a plan was not simulated, plus the simulator's own words when it gave them. */
+export function notSimulatedText(run: RunRecord): { reason: string; detail?: string } {
+  const r = run.notSimulatedReason;
+  if (r?.reason === "unsupported") return { reason: "The simulator can't run this kind of plan yet.", detail: r.message };
+  return { reason: "The simulator is offline, and there is no saved run for this plan." };
 }

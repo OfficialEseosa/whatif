@@ -11,7 +11,7 @@ import { selectActiveRun, useStore, type PipelineStep, type RunRecord } from "@/
 import { ChevronDownIcon } from "../icons";
 import { focusComposer } from "../uiStore";
 import { EditBody, PlanBody, RouteBody, ScoreBody, StopsBody } from "./StepBodies";
-import { SOURCE_WORDS, editLine, fmtDur, planLine, routeLine, scoreLine, sourceKind } from "./runFormat";
+import { SOURCE_WORDS, editLine, fmtDur, notSimulatedText, planLine, routeLine, scoreLine, sourceKind } from "./runFormat";
 import "./run.css";
 
 /** How long a finished run stays open before it folds into the bar. */
@@ -69,7 +69,7 @@ export function RunPanel() {
     : running
       ? `Building, ${fmtDur(total, true)}`
       : run.notSimulated
-        ? "Not simulated yet"
+        ? "Not simulated"
         : `Built in ${fmtDur(total) || "0.0 s"}`;
   const state = failed ? "error" : running ? "running" : "done";
 
@@ -247,7 +247,16 @@ function StepLine({ step, run, elapsed, onRetry }: { step: PipelineStep; run: Ru
             )}
           </div>
         );
-      if (!r) return run.notSimulated ? <p className="rp-line">Not simulated yet. No saved run for this plan.</p> : null;
+      if (!r) {
+        if (!run.notSimulated) return null;
+        const why = notSimulatedText(run);
+        return (
+          <>
+            <p className="rp-line">Not simulated. {why.reason}</p>
+            {why.detail && <p className="rp-line rp-small">{why.detail}</p>}
+          </>
+        );
+      }
       return (
         <>
           <p className="rp-line">{routeLine(r)}</p>

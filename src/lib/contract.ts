@@ -657,6 +657,12 @@ export const SimulatePointerSchema = z.object({
   matched: z.boolean().optional(),
   /** Article claims checked against this result (only when the request carried claims). */
   claims: z.array(ClaimCheckSchema).optional(),
+  /**
+   * Optional (additive): set when nothing simulated this edit, with source "mock". "unsupported" = the
+   * simulator answered that it can't run this kind of plan (message = its reason); "offline" = no
+   * simulator is configured. The UI shows the plan itself, never the placeholder's numbers.
+   */
+  notSimulated: z.object({ reason: z.enum(["unsupported", "offline"]), message: z.string().optional() }).optional(),
 });
 export type SimulatePointer = z.infer<typeof SimulatePointerSchema>;
 /** What POST /api/simulate can return: a full result (live sim) or a pointer to a stored one. */

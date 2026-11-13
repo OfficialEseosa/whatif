@@ -138,6 +138,7 @@ export function useBuildFlow() {
       file: null,
       result: null,
       notSimulated: false,
+      notSimulatedReason: null,
       error: null,
       cancelled: false,
     };
@@ -176,7 +177,7 @@ export function useBuildFlow() {
       st().set({ phase: "simulating", claims: plan.claims ?? null });
       start("route");
       const simStart = performance.now();
-      const { result, timing } = await api.simulateTimed({ edit: plan.edit, claims: plan.claims });
+      const { result, timing, notSimulated } = await api.simulateTimed({ edit: plan.edit, claims: plan.claims });
       if (!live()) return;
       patch({ simMs: performance.now() - simStart, routeMs: timing.routeMs, file: timing.file, result });
       if (!result) {
@@ -184,7 +185,7 @@ export function useBuildFlow() {
         // never draw or score another plan's results.
         finish("route", "warn");
         const steps = st().runs.find((r) => r.id === id)?.steps.filter((p) => p.id !== "score" && p.id !== "draw") ?? [];
-        patch({ notSimulated: true, steps, endedAt: performance.now() });
+        patch({ notSimulated: true, notSimulatedReason: notSimulated ?? { reason: "offline" }, steps, endedAt: performance.now() });
         st().set({ phase: "done", pipeline: steps, resultsOpen: true });
         const cam = cameraForEdit(plan.edit, st().network, st().view === "photoreal");
         if (cam) st().set({ camera: cam });
