@@ -2,24 +2,24 @@
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import type { LngLat, Network, RailKind, Station } from "@/lib/contract";
 import { MAP_COLORS } from "../colors";
-import { overlayParameters } from "./common";
+import { LIFT_M, lift, terrainProps } from "./common";
 
 type Seg = { path: LngLat[]; kind: RailKind };
 
 export function railLayers(network: Network, photoreal: boolean) {
   const segs: Seg[] = network.rail.flatMap((l) => l.paths.map((path) => ({ path, kind: l.kind })));
-  const parameters = overlayParameters(photoreal);
   return [
     new PathLayer<Seg>({
       id: "rail",
       data: segs,
-      getPath: (d) => d.path,
+      getPath: (d) => lift(d.path, photoreal ? LIFT_M.rail : 0),
       getColor: (d) => (d.kind === "streetcar" ? MAP_COLORS.streetcar : d.kind === "freight" ? MAP_COLORS.freight : MAP_COLORS.rail),
       getWidth: (d) => (d.kind === "freight" ? 1 : d.kind === "streetcar" ? 3 : 3),
       widthUnits: "pixels",
       capRounded: true,
       jointRounded: true,
-      parameters,
+      updateTriggers: { getPath: photoreal },
+      ...terrainProps(photoreal),
     }),
     new ScatterplotLayer<Station>({
       id: "stations",
@@ -33,7 +33,7 @@ export function railLayers(network: Network, photoreal: boolean) {
       getLineColor: MAP_COLORS.station,
       lineWidthMinPixels: 1.5,
       pickable: true,
-      parameters,
+      ...terrainProps(photoreal),
     }),
   ];
 }

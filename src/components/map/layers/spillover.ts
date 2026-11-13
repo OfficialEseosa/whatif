@@ -2,7 +2,7 @@
 import { PathLayer } from "@deck.gl/layers";
 import type { Network, NetworkRoad, RoadEffect } from "@/lib/contract";
 import { MAP_COLORS, withAlpha } from "../colors";
-import { overlayParameters } from "./common";
+import { LIFT_M, lift, terrainProps } from "./common";
 
 type D = NetworkRoad & { delta: number; highlighted: boolean };
 
@@ -20,13 +20,13 @@ export function spilloverLayer(network: Network, effects: RoadEffect[], opts: { 
   return new PathLayer<D>({
     id: "spillover",
     data,
-    getPath: (d) => d.path,
+    getPath: (d) => lift(d.path, opts.photoreal ? LIFT_M.spillover : 0),
     getColor: (d) => withAlpha(d.delta > 0 ? MAP_COLORS.loss : MAP_COLORS.gain, d.highlighted ? 255 : 120 + Math.min(1, Math.abs(d.delta) * 4) * 135),
     getWidth: (d) => (d.highlighted ? 6 : 3),
     widthUnits: "pixels",
     capRounded: true,
     opacity: opts.opacity,
-    updateTriggers: { getColor: [...hl].join(), getWidth: [...hl].join() },
-    parameters: overlayParameters(opts.photoreal),
+    updateTriggers: { getColor: [...hl].join(), getWidth: [...hl].join(), getPath: opts.photoreal },
+    ...terrainProps(opts.photoreal),
   });
 }

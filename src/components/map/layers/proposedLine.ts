@@ -1,63 +1,102 @@
-/** The proposed line drawing itself (glow + core) and its stops popping in. */
+/**
+ * The proposed line or road being built: glow + core drawn progressively along the path,
+ * a construction "head" at the tip while it is drawing, and stops popping in as it passes them.
+ */
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
-import type { LngLat, ScenarioResult, Stop } from "@/lib/contract";
+import type { Position } from "@deck.gl/core";
+import type { LngLat, Network, ScenarioResult, Stop } from "@/lib/contract";
 import { MAP_COLORS } from "../colors";
-import { cumulativeFractions, overlayParameters, partialPath } from "./common";
+import { LIFT_M, cumulativeFractions, lift, partialPath, terrainProps } from "./common";
+
+export type BuildGeometry = { path: LngLat[]; stops: Stop[]; kind: "transit" | "road" };
+
+/**
+ * What to draw for this edit. Transit edits use `line`; road edits (`new_road`) use `line.path` if the
+ * producer filled it, else the network roads listed in `edit.roadIds`, chained in order.
+ */
+export function buildGeometry(s: ScenarioResult, network: Network | null): BuildGeometry | null {
+  const road = s.edit.type === "new_road";
+  if (s.line.path.length >= 2) return { path: s.line.path, stops: road ? [] : s.line.stops, kind: road ? "road" : "transit" };
+  if (road && network && s.edit.roadIds?.length) {
+    const byId = new Map(network.roads.map((r) => [r.id, r]));
+    const path = s.edit.roadIds.flatMap((id) => byId.get(id)?.path ?? []);
+    if (path.length >= 2) return { path, stops: [], kind: "road" };
+  }
+  return null;
+}
 
 type StopD = Stop & { at: number };
 
-export function proposedLineLayers(line: ScenarioResult["line"], progress: number, photoreal: boolean) {
-  if (!line.path.length || progress <= 0) return [];
-  const fr = cumulativeFractions(line.path);
-  const path = partialPath(line.path, fr, progress);
-  const stops: StopD[] = line.stops.map((s) => {
+export function proposedLineLayers(geom: BuildGeometry, progress: number, photoreal: boolean) {
+  if (geom.path.length < 2 || progress <= 0) return [];
+  const fr = cumulativeFractions(geom.path);
+  const drawn = partialPath(geom.path, fr, progress);
+  const stops: StopD[] = geom.stops.map((s) => {
     let bi = 0;
     let bd = Infinity;
-    line.path.forEach((p, i) => {
+    geom.path.forEach((p, i) => {
       const d = Math.hypot(p[0] - s.coord[0], p[1] - s.coord[1]);
       if (d < bd) { bd = d; bi = i; }
     });
     return { ...s, at: fr[bi] };
   });
-  const parameters = overlayParameters(photoreal);
-  const data = [{ path }];
+  const z = photoreal ? LIFT_M.proposed : 0;
+  const road = geom.kind === "road";
+  const core = road ? MAP_COLORS.proposedRoad : MAP_COLORS.proposed;
+  const data = [{ path: lift(drawn, z) }];
+  const tip = drawn[drawn.length - 1];
+  const scale = photoreal ? 1.5 : 1;
+  const shown = stops.filter((d) => progress >= d.at - 0.01).length;
   return [
-    new PathLayer<{ path: LngLat[] }>({
+    new PathLayer<{ path: Position[] }>({
       id: "proposed-glow",
       data,
       getPath: (d) => d.path,
-      getColor: MAP_COLORS.proposedGlow,
-      getWidth: 16,
+      getColor: road ? MAP_COLORS.proposedRoadGlow : MAP_COLORS.proposedGlow,
+      getWidth: 16 * scale,
       widthUnits: "pixels",
       capRounded: true,
       jointRounded: true,
-      parameters,
+      ...terrainProps(photoreal),
     }),
-    new PathLayer<{ path: LngLat[] }>({
+    new PathLayer<{ path: Position[] }>({
       id: "proposed-line",
       data,
       getPath: (d) => d.path,
-      getColor: MAP_COLORS.proposed,
-      getWidth: 4.5,
+      getColor: core,
+      getWidth: (road ? 6 : 4.5) * scale,
       widthUnits: "pixels",
       capRounded: true,
       jointRounded: true,
-      parameters,
+      ...terrainProps(photoreal),
+    }),
+    // construction head while drawing
+    new ScatterplotLayer<{ p: number[] }>({
+      id: "proposed-build-head",
+      data: progress < 1 && tip ? [{ p: [tip[0], tip[1], z] }] : [],
+      getPosition: (d) => d.p as [number, number, number],
+      getRadius: 9 * scale,
+      radiusUnits: "pixels",
+      getFillColor: MAP_COLORS.buildHead,
+      stroked: true,
+      getLineColor: core,
+      lineWidthMinPixels: 2,
+      ...terrainProps(photoreal),
     }),
     new ScatterplotLayer<StopD>({
       id: "proposed-stops",
       data: stops,
-      getPosition: (d) => d.coord,
-      getRadius: (d) => (progress >= d.at - 0.01 ? 7 : 0),
+      getPosition: (d) => [d.coord[0], d.coord[1], photoreal ? LIFT_M.stops : 0],
+      getRadius: (d) => (progress >= d.at - 0.01 ? 7 * scale : 0),
       radiusUnits: "pixels",
       stroked: true,
       getFillColor: [20, 22, 28, 255],
-      getLineColor: MAP_COLORS.proposed,
+      getLineColor: core,
       lineWidthMinPixels: 2.5,
       pickable: true,
       transitions: { getRadius: { duration: 300 } },
-      updateTriggers: { getRadius: stops.filter((d) => progress >= d.at - 0.01).length },
-      parameters,
+      updateTriggers: { getRadius: shown, getPosition: photoreal },
+      ...terrainProps(photoreal),
     }),
   ];
 }

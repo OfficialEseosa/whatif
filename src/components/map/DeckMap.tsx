@@ -3,12 +3,15 @@
  * deck.gl map (client-only; loaded via next/dynamic with ssr:false from MapStage).
  * One camera shared by both views; the view toggle only swaps the basemap layers.
  *   Analysis : Google 2D tiles if NEXT_PUBLIC_GOOGLE_MAPS_API_KEY, else keyless OSM vector roads.
- *   Photoreal: Google Photorealistic 3D Tiles if key, else keyless roads at a steeper pitch.
+ *   Photoreal: Google Photorealistic 3D Tiles if key (overlays sit on the tiles via TerrainExtension
+ *              and are occluded by buildings), else keyless roads at a steeper pitch.
+ * Camera: free orbit. Drag = pan, right-drag / ctrl-drag = rotate + tilt (to 85°), wheel = zoom,
+ * two-finger touch rotate/tilt. The store's `camera` only issues fly-to moves; it never clamps.
  */
 import { useEffect, useMemo, useState } from "react";
 import DeckGL from "@deck.gl/react";
-import { FlyToInterpolator, type PickingInfo } from "@deck.gl/core";
-import { useStore, selectMapScenario } from "@/lib/store";
+import { FlyToInterpolator, type MapViewState, type PickingInfo } from "@deck.gl/core";
+import { INITIAL_CAMERA, useStore, selectMapScenario } from "@/lib/store";
 import { api } from "@/lib/api";
 import { keylessRoadsLayer } from "./layers/keylessBasemap";
 import { google2dLayer, fetchGoogle2dAttribution } from "./layers/google2d";
@@ -19,11 +22,17 @@ import { spilloverLayer } from "./layers/spillover";
 import { tractsLayers } from "./layers/tracts";
 import { rentPressureLayer } from "./layers/rentPressure";
 import { historyOverlayLayers } from "./layers/historyOverlay";
-import { proposedLineLayers } from "./layers/proposedLine";
+import { buildGeometry, proposedLineLayers } from "./layers/proposedLine";
 import { buildTripData, tripsLayer } from "./layers/trips";
 import { atRiskLayer } from "./layers/atRisk";
 
 const GOOGLE_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
+const MAX_PITCH = 85;
+/**
+ * Google 3D tiles use ellipsoidal heights; ground in the box is roughly 220-300 m above the WGS84
+ * ellipsoid. Lifting the camera target keeps a close, steep camera above the mesh instead of inside it.
+ */
+const PHOTOREAL_TARGET_Z = 270;
 
 export default function DeckMap() {
   const network = useStore((s) => s.network);
@@ -40,6 +49,8 @@ export default function DeckMap() {
   const activeHistory = useStore((s) => s.history.find((h) => h.id === s.activeHistoryId) ?? null);
 
   const photoreal = view === "photoreal";
+  /** Overlays use the 3D-tiles terrain only when the tiles are actually there. */
+  const p3d = photoreal && !!GOOGLE_KEY;
   const [session, setSession] = useState<string | null>(null);
   const [credits3d, setCredits3d] = useState("");
   const [credits2d, setCredits2d] = useState("");
@@ -54,50 +65,82 @@ export default function DeckMap() {
     });
   }, []);
 
-  const initialViewState = useMemo(
-    () => ({
+  // --- camera (controlled; fly-to on store.camera changes, never resets bearing/pitch otherwise)
+  const [viewState, setViewState] = useState<MapViewState>({ ...INITIAL_CAMERA, maxPitch: MAX_PITCH });
+  // React's "adjust state when a prop changes" pattern (no effects).
+  const [seenCamera, setSeenCamera] = useState(camera);
+  if (seenCamera !== camera) {
+    setSeenCamera(camera);
+    setViewState((v) => ({
+      ...v,
       ...camera,
-      pitch: photoreal ? Math.max(camera.pitch, 60) : camera.pitch,
+      maxPitch: MAX_PITCH,
       transitionDuration: camera.transitionDuration ?? 800,
       transitionInterpolator: new FlyToInterpolator(),
-    }),
-    [camera, photoreal],
-  );
+    }));
+  }
+  const [seenPhotoreal, setSeenPhotoreal] = useState(photoreal);
+  if (seenPhotoreal !== photoreal) {
+    setSeenPhotoreal(photoreal);
+    // Entering photoreal from a flat view: tilt so the buildings read. Keep bearing/zoom/center.
+    if (photoreal && (viewState.pitch ?? 0) < 45)
+      setViewState({ ...viewState, pitch: 55, transitionDuration: 600, transitionInterpolator: new FlyToInterpolator() });
+  }
 
   const switchStep = built ? Math.round(switchProgress * 10) / 10 : 0;
   const agents = scenario?.agents;
   const tripData = useMemo(() => (agents ? buildTripData(agents, switchStep, horizon) : []), [agents, switchStep, horizon]);
+  const geom = useMemo(() => (built && scenario ? buildGeometry(scenario, network) : null), [built, scenario, network]);
 
   const layers = [];
-  // --- basemap
-  if (photoreal && GOOGLE_KEY) layers.push(photorealLayer(GOOGLE_KEY, setCredits3d));
+  // --- basemap (the dense all-roads layer is skipped in photoreal: the photo shows the streets)
+  if (p3d) layers.push(photorealLayer(GOOGLE_KEY, setCredits3d));
   else if (!photoreal && GOOGLE_KEY && session) layers.push(google2dLayer(session, GOOGLE_KEY));
   else if (network) layers.push(keylessRoadsLayer(network, built));
   // --- analysis layers
-  if (built && scenario) layers.push(...tractsLayers(scenario.tracts, { opacity: switchProgress, photoreal, bbox: network?.bbox }));
-  if (network && activeHistory) layers.push(...historyOverlayLayers(network, activeHistory.overlay, photoreal));
+  if (built && scenario) layers.push(...tractsLayers(scenario.tracts, { opacity: switchProgress, photoreal: p3d, bbox: network?.bbox }));
+  if (network && activeHistory) layers.push(...historyOverlayLayers(network, activeHistory.overlay, p3d));
   if (built && scenario && network) {
     const hl = highlightZone === "spillover" ? scenario.whoPays.items.find((i) => i.zone === "spillover" && i.roadIds)?.roadIds : undefined;
-    layers.push(spilloverLayer(network, scenario.roads, { opacity: switchProgress, highlightIds: hl, photoreal }));
+    layers.push(spilloverLayer(network, scenario.roads, { opacity: switchProgress, highlightIds: hl, photoreal: p3d }));
   }
-  if (network) layers.push(beltlineLayer(network, photoreal), ...railLayers(network, photoreal));
+  if (network) layers.push(beltlineLayer(network, p3d), ...railLayers(network, p3d));
   if (built && scenario && (tab === "whoPays" || horizon !== "opening" || highlightZone === "rent_pressure"))
-    layers.push(rentPressureLayer(scenario.tracts, photoreal));
-  if (built && scenario) layers.push(...proposedLineLayers(scenario.line, lineProgress, photoreal));
-  if (tripData.length) layers.push(tripsLayer(tripData, time, photoreal));
-  if (built && scenario && horizon !== "opening") layers.push(atRiskLayer(scenario.agents, horizon, photoreal));
+    layers.push(rentPressureLayer(scenario.tracts, p3d));
+  if (geom) layers.push(...proposedLineLayers(geom, lineProgress, p3d));
+  if (tripData.length) layers.push(tripsLayer(tripData, time, p3d));
+  if (built && scenario && horizon !== "opening") layers.push(atRiskLayer(scenario.agents, horizon, p3d));
 
   const googleOnScreen = !!GOOGLE_KEY && (photoreal || !!session);
   const credits = photoreal ? credits3d : credits2d;
+  const bearing = viewState.bearing ?? 0;
 
   return (
     <div className="map-canvas">
       <DeckGL
-        initialViewState={initialViewState}
-        controller={{ dragRotate: true, touchRotate: true }}
+        viewState={{ ...viewState, position: [0, 0, p3d ? PHOTOREAL_TARGET_Z : 0] }}
+        onViewStateChange={({ viewState: v }) => setViewState({ ...(v as MapViewState), maxPitch: MAX_PITCH })}
+        controller={{ dragRotate: true, touchRotate: true, keyboard: true, inertia: 300 }}
         layers={layers}
         getTooltip={tooltip}
       />
+      <div className="map-ui map-ui-compass row gap-sm">
+        <button
+          className="btn compass"
+          title="North up (drag with right mouse button or Ctrl to rotate and tilt)"
+          aria-label={`Bearing ${Math.round(bearing)} degrees. Reset to north`}
+          onClick={() => setViewState((v) => ({ ...v, bearing: 0, transitionDuration: 500, transitionInterpolator: new FlyToInterpolator() }))}
+        >
+          <span style={{ display: "inline-block", transform: `rotate(${-bearing}deg)` }}>▲</span>
+        </button>
+        <button
+          className="btn"
+          title="Reset view"
+          onClick={() => setViewState({ ...INITIAL_CAMERA, pitch: photoreal ? 55 : INITIAL_CAMERA.pitch, maxPitch: MAX_PITCH, transitionDuration: 900, transitionInterpolator: new FlyToInterpolator() })}
+        >
+          Reset view
+        </button>
+      </div>
       <div className="map-attribution">
         {googleOnScreen ? (
           <>
@@ -117,6 +160,6 @@ function tooltip(info: PickingInfo) {
   if (!o) return null;
   if (typeof o.name === "string") return o.name;
   if (typeof o.label === "string") return o.label;
-  if (typeof o.minutesDelta === "number") return `${(o.minutesDelta as number).toFixed(1)} min avg commute change`;
+  if (typeof o.minutesDelta === "number") return `${(o.minutesDelta as number).toFixed(2)} min avg commute change`;
   return null;
 }

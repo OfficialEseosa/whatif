@@ -12,7 +12,17 @@ export const MAP_COLORS = {
   station: [200, 205, 215, 255] as RGBA,
   beltline: [110, 150, 120, 200] as RGBA,
   proposed: [255, 176, 64, 255] as RGBA,
-  proposedGlow: [255, 176, 64, 60] as RGBA,
+  proposedGlow: [255, 176, 64, 70] as RGBA,
+  proposedRoad: [235, 235, 240, 255] as RGBA,
+  proposedRoadGlow: [255, 176, 64, 50] as RGBA,
+  buildHead: [255, 230, 160, 255] as RGBA,
+  // Vehicles (schedule-shaped, placeholder headways; see layers/vehicles.ts)
+  martaTrain: [255, 255, 255, 255] as RGBA,
+  streetcarVehicle: [120, 220, 255, 255] as RGBA,
+  proposedVehicle: [255, 210, 120, 255] as RGBA,
+  // Rail structure (Underground mode)
+  tunnel: [170, 120, 255, 230] as RGBA,
+  bridge: [150, 160, 180, 230] as RGBA,
   gain: [60, 200, 140, 255] as RGBA,
   loss: [240, 100, 100, 255] as RGBA,
   history: [200, 165, 120, 255] as RGBA,

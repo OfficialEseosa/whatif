@@ -118,3 +118,6 @@ export const useStore = create<State & Actions>((set) => ({
 
 /** The scenario whose agents/geometry the map should draw right now. */
 export const selectMapScenario = (s: State) => s.scenario ?? s.preview;
+
+// Debug handle for the browser console (e.g. __whatifStore.getState()). Harmless in production.
+if (typeof window !== "undefined") (window as unknown as { __whatifStore?: typeof useStore }).__whatifStore = useStore;

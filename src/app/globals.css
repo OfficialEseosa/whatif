@@ -143,3 +143,5 @@ a { color: inherit; }
 .badge-mock-section { color: var(--fair); border-style: dashed; text-transform: none; }
 .is-mock-section { outline: 1px dashed var(--fair); outline-offset: 3px; border-radius: var(--radius); }
 .bar-neutral { background: var(--border); }
+.map-ui-compass { right: var(--space-sm); top: 52px; }
+.compass { width: 34px; padding: 4px 0; text-align: center; }

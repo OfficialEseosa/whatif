@@ -6,7 +6,7 @@ import { TripsLayer } from "@deck.gl/geo-layers";
 import type { Agent, LngLat } from "@/lib/contract";
 import type { Horizon } from "@/lib/store";
 import { MAP_COLORS, withAlpha, type RGBA } from "../colors";
-import { hash01, overlayParameters } from "./common";
+import { LIFT_M, hash01, lift, terrainProps } from "./common";
 
 export type TripDatum = { path: LngLat[]; timestamps: number[]; color: RGBA };
 
@@ -28,15 +28,16 @@ export function tripsLayer(data: TripDatum[], currentTime: number, photoreal: bo
   return new TripsLayer<TripDatum>({
     id: "trips",
     data,
-    getPath: (d) => d.path,
+    getPath: (d) => lift(d.path, photoreal ? LIFT_M.trips : 0),
     getTimestamps: (d) => d.timestamps,
     getColor: (d) => d.color,
-    widthMinPixels: 2.5,
+    widthMinPixels: photoreal ? 3.5 : 2.5,
     capRounded: true,
     jointRounded: true,
     trailLength: 240,
     fadeTrail: true,
     currentTime,
-    parameters: overlayParameters(photoreal),
+    updateTriggers: { getPath: photoreal },
+    ...terrainProps(photoreal),
   });
 }

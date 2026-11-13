@@ -2,7 +2,7 @@
 import { PolygonLayer } from "@deck.gl/layers";
 import type { TractEffect } from "@/lib/contract";
 import { MAP_COLORS, withAlpha } from "../colors";
-import { overlayParameters } from "./common";
+import { terrainProps } from "./common";
 
 export function rentPressureLayer(tracts: TractEffect[], photoreal: boolean) {
   return new PolygonLayer<TractEffect>({
@@ -13,6 +13,6 @@ export function rentPressureLayer(tracts: TractEffect[], photoreal: boolean) {
     getLineColor: MAP_COLORS.rentPressure,
     lineWidthMinPixels: 1.5,
     stroked: true,
-    parameters: overlayParameters(photoreal),
+    ...terrainProps(photoreal, "drape"),
   });
 }

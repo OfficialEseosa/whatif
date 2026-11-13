@@ -1,12 +1,35 @@
 /** Shared helpers for layer modules. */
+import { _TerrainExtension as TerrainExtension } from "@deck.gl/extensions"; // experimental in deck.gl 9.x
+import type { Position } from "@deck.gl/core";
 import type { LngLat } from "@/lib/contract";
 
+const TERRAIN = new TerrainExtension();
+
 /**
- * In the photoreal view our flat (z = 0) overlays would sit under Google's terrain/buildings,
- * so draw them on top of everything. TODO(Prosper): drape properly (elevation offset) if wanted.
+ * Photoreal view: overlays sit on Google's 3D tiles via deck.gl TerrainExtension (the Tile3DLayer
+ * is the terrain source, `operation: "terrain+draw"`), and keep normal depth testing so buildings
+ * occlude them.
+ *   offset: vertices are lifted by the terrain height under them (paths, points, trips)
+ *   drape : drawn into a texture laid over the terrain (flat fills like tract tints)
+ * `xray` (Underground mode) disables depth testing so tunnels/trains below the surface show through.
  */
-export const overlayParameters = (photoreal: boolean) =>
-  photoreal ? ({ depthCompare: "always", depthWriteEnabled: false } as const) : undefined;
+export function terrainProps(photoreal: boolean, mode: "offset" | "drape" = "offset", xray = false) {
+  if (!photoreal) return {};
+  return {
+    extensions: [TERRAIN],
+    terrainDrawMode: mode,
+    ...(xray ? { parameters: { depthCompare: "always" as const, depthWriteEnabled: false } } : {}),
+  };
+}
+
+/** Meters above the terrain surface for each overlay in photoreal (avoids z-fighting with the mesh). */
+export const LIFT_M = { trips: 2, rail: 3, beltline: 2, spillover: 3, history: 4, proposed: 8, vehicles: 4, stops: 9 } as const;
+
+/** Adds a z (meters) to every vertex; identity when z is 0. */
+export function lift(path: Position[], z: number): Position[] {
+  if (!z) return path;
+  return path.map((p) => [p[0], p[1], (p[2] ?? 0) + z] as Position);
+}
 
 export const lengthKm = (a: LngLat, b: LngLat) => Math.hypot((a[0] - b[0]) * 92.57, (a[1] - b[1]) * 111.0);
 

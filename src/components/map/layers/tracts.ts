@@ -5,7 +5,7 @@
 import { PolygonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import type { TractEffect } from "@/lib/contract";
 import { MAP_COLORS, withAlpha } from "../colors";
-import { overlayParameters } from "./common";
+import { terrainProps } from "./common";
 
 const MIN_DELTA = 0.005; // minutes; below this a tract is not drawn
 
@@ -16,7 +16,6 @@ export function tractsLayers(tracts: TractEffect[], opts: { opacity: number; pho
   const shown = tracts.filter((t) => Math.abs(t.minutesDelta) > MIN_DELTA);
   const inBox = (t: TractEffect) =>
     !opts.bbox || (t.centroid[0] >= opts.bbox[0] && t.centroid[0] <= opts.bbox[2] && t.centroid[1] >= opts.bbox[1] && t.centroid[1] <= opts.bbox[3]);
-  const parameters = overlayParameters(opts.photoreal);
   return [
     new PolygonLayer<TractEffect>({
       id: "tracts",
@@ -26,7 +25,7 @@ export function tractsLayers(tracts: TractEffect[], opts: { opacity: number; pho
       stroked: false,
       opacity: opts.opacity,
       pickable: true,
-      parameters,
+      ...terrainProps(opts.photoreal, "drape"),
     }),
     new ScatterplotLayer<TractEffect>({
       id: "tract-centroids",
@@ -38,7 +37,7 @@ export function tractsLayers(tracts: TractEffect[], opts: { opacity: number; pho
       stroked: false,
       opacity: opts.opacity,
       pickable: true,
-      parameters,
+      ...terrainProps(opts.photoreal, "drape"),
     }),
   ];
 }
