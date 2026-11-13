@@ -26,6 +26,7 @@ export function Composer() {
   const built = useStore((s) => s.scenario !== null);
   const lastPrompt = useUi((s) => s.lastPrompt);
   const hasSession = useUi((s) => s.session.length > 0);
+  const hasRun = useStore((s) => s.activeRunId !== null);
   const setUi = useUi((s) => s.setUi);
   const build = useBuildFlow();
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -75,7 +76,8 @@ export function Composer() {
     setUi({ lastPrompt: value, pending: { text: value, mode: m }, popover: null });
     ref.current?.blur();
     // A follow-up modifies the plan on screen; a pasted article starts a new one.
-    const previousEdit = s.scenario && m !== "article" ? s.scenario.edit : undefined;
+    const shown = s.scenario?.edit ?? s.runs.find((r) => r.id === s.activeRunId)?.edit ?? undefined;
+    const previousEdit = shown && m !== "article" ? shown : undefined;
     build(undefined, previousEdit ? { previousEdit } : undefined);
   };
   const fill = (value: string) => {
@@ -87,7 +89,8 @@ export function Composer() {
 
   return (
     <div className="dock" data-state={busy ? "running" : built ? "result" : "idle"}>
-      {error && !busy && (
+      {/* A run's own failure is shown in the run panel; this banner is for anything else. */}
+      {error && !busy && !hasRun && (
         <p className="surface dock-error" role="alert">
           <span className="grow">{error === "Cancelled" ? "Run cancelled." : `Run failed. ${error}`}</span>
           <button className="icon-btn" aria-label="Dismiss" onClick={() => useStore.getState().set({ error: null })}>

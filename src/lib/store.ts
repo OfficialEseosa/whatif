@@ -58,6 +58,8 @@ export type RunRecord = {
   /** Set when the route pointed at a stored file and the client fetched it. */
   file: { url: string; ms: number; bytes: number } | null;
   result: ScenarioResult | null;
+  /** The server has no simulation for this edit: the run stops after Route commuters, nothing is scored. */
+  notSimulated: boolean;
   error: { step: string; message: string } | null;
   cancelled: boolean;
 };

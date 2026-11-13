@@ -1,7 +1,7 @@
 /**
  * Run-panel coupling on the map (self-contained; owned by src/components/run).
  *   - placed stops ping once each, in panel order (120 ms stagger, 600 ms ring), from lastRun.pingAt
- *   - a faint dashed "schematic" polyline through the stops, and the edit's roadIds highlighted,
+ *   - a faint dashed polyline through the stops, and the edit's roadIds highlighted, tagged "plan preview",
  *     until the simulated line starts drawing
  *   - the stop hovered in the panel (runHoverStop) gets a ring
  * Under reduced motion the rings are static and nothing pulses.
@@ -76,19 +76,26 @@ export function useRunPingLayers(photoreal: boolean): Layer[] {
     () => (stops.length >= 2 ? [{ path: stops.map((s) => s.coord) }] : []),
     [stops],
   );
-  const label = useMemo(() => {
-    if (stops.length < 2) return [];
-    const a = stops[Math.floor((stops.length - 1) / 2)].coord;
-    const b = stops[Math.floor((stops.length - 1) / 2) + 1].coord;
-    return [{ at: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as LngLat }];
-  }, [stops]);
+  // Network the edit touches: its roads, or (frequency changes) the existing line it retimes.
   const roads = useMemo(() => {
-    if (!edit?.roadIds?.length || !network) return [];
-    const ids = new Set(edit.roadIds);
-    return network.roads
-      .filter((r) => ids.has(r.id))
-      .map((r) => ({ path: r.path }));
+    if (!edit || !network) return [];
+    const ids = new Set(edit.roadIds ?? []);
+    const out = network.roads.filter((r) => ids.has(r.id)).map((r) => ({ path: r.path }));
+    if (!edit.stops.length && edit.baseLineId)
+      for (const line of network.rail) if (line.id === edit.baseLineId) out.push(...line.paths.map((path) => ({ path })));
+    return out;
   }, [edit, network]);
+  // "Plan preview" tag: between the middle stops, or on the first affected road for road-only edits.
+  const label = useMemo(() => {
+    if (stops.length >= 2) {
+      const a = stops[Math.floor((stops.length - 1) / 2)].coord;
+      const b = stops[Math.floor((stops.length - 1) / 2) + 1].coord;
+      return [{ at: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] as LngLat }];
+    }
+    const path = roads[0]?.path;
+    return path?.length ? [{ at: path[Math.floor(path.length / 2)] as LngLat }] : [];
+  }, [stops, roads]);
+
 
   const failed = run?.error != null;
   const pre = !lineStarted && !failed; // until the simulated line starts drawing
@@ -133,14 +140,17 @@ export function useRunPingLayers(photoreal: boolean): Layer[] {
           ...ext([DASH]),
         } as PathLayerProps<{ path: LngLat[] }> &
           PathStyleExtensionProps<{ path: LngLat[] }>),
+      );
+    if (pre && label.length)
+      layers.push(
         new TextLayer<{ at: LngLat }>({
           id: "run-schematic-label",
           data: label,
           getPosition: (d) => pt(d.at),
-          getText: () => "schematic",
+          getText: () => "plan preview",
           getSize: 12,
           getColor: [...INK, 220],
-          fontFamily: "ui-monospace, Consolas, monospace",
+          fontFamily: "system-ui, sans-serif",
           background: true,
           getBackgroundColor: [...PAPER, 230],
           backgroundPadding: [4, 2],

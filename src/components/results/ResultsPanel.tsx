@@ -1,11 +1,12 @@
 "use client";
 import { useEffect } from "react";
 import { useBuildFlow } from "@/hooks/useBuildFlow";
-import { useStore } from "@/lib/store";
+import { DEFAULT_TEXT, selectActiveRun, useStore, type RunRecord } from "@/lib/store";
 import { isMockSection, scenarioSource } from "@/lib/provenance";
 import type { LngLat, ScenarioSource } from "@/lib/contract";
 import { ChevronDownIcon, CloseIcon } from "../icons";
-import { useUi, type UiTab } from "../uiStore";
+import { focusComposer, useUi, type UiTab } from "../uiStore";
+import { editLine, planLine } from "../run/runFormat";
 import { Alternatives, ClaimCheckList, TestRows, VERDICT_GRADE, VERDICT_WORD } from "./VerdictPane";
 import { ImpactPane } from "./ImpactPane";
 import { WhoPaysPane } from "./WhoPaysPane";
@@ -20,6 +21,16 @@ export function ResultsPanel() {
   const phase = useStore((s) => s.phase);
   const open = useStore((s) => s.resultsOpen);
   const set = useStore((s) => s.set);
+  const run = useStore(selectActiveRun);
+  const preview = !scenario && phase === "done" && run?.notSimulated && run.edit ? run : null;
+  if (preview)
+    return open ? (
+      <NotSimulated run={preview} />
+    ) : (
+      <button className="surface results-chip" onClick={() => set({ resultsOpen: true })}>
+        Show plan
+      </button>
+    );
   if (!scenario || !(phase === "done" || phase === "building" || phase === "error")) return null;
   if (!open)
     return (
@@ -139,6 +150,39 @@ function Card() {
           {chatOpen && current === "townHall" && <PersonaChat personas={scenario.personas} />}
         </div>
       )}
+    </aside>
+  );
+}
+
+/** A plan the parser understood but the server has no simulation for: the plan itself, no numbers. */
+function NotSimulated({ run }: { run: RunRecord }) {
+  const network = useStore((s) => s.network);
+  const set = useStore((s) => s.set);
+  const e = run.edit!;
+  const tryStreetcar = () => {
+    set({ text: DEFAULT_TEXT.prompt });
+    requestAnimationFrame(focusComposer);
+  };
+  return (
+    <aside className="surface results" aria-label="Results">
+      <header className="results-head">
+        <div className="grow">
+          <h2 className="verdict-word">Not simulated yet</h2>
+          <p className="results-title">{e.name}</p>
+        </div>
+        <button className="icon-btn" aria-label="Close results" onClick={() => set({ resultsOpen: false })}>
+          <CloseIcon />
+        </button>
+      </header>
+      <p className="verdict-headline">
+        {e.type === "change_frequency" ? `${editLine(e, network)}.` : `${planLine(e)}. ${editLine(e, network)}.`}
+      </p>
+      <div className="results-foot">
+        {/* The only plan with a saved simulation run today (public/scenarios/beltline-streetcar.sim.json). */}
+        <button className="btn" onClick={tryStreetcar}>
+          Try: Streetcar to Ponce City Market
+        </button>
+      </div>
     </aside>
   );
 }

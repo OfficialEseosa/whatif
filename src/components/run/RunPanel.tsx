@@ -9,6 +9,7 @@ import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { cancelRun, useBuildFlow } from "@/hooks/useBuildFlow";
 import { selectActiveRun, useStore, type PipelineStep, type RunRecord } from "@/lib/store";
 import { ChevronDownIcon } from "../icons";
+import { focusComposer } from "../uiStore";
 import { EditBody, PlanBody, RouteBody, ScoreBody, StopsBody } from "./StepBodies";
 import { SOURCE_WORDS, editLine, fmtDur, planLine, routeLine, scoreLine, sourceKind } from "./runFormat";
 import "./run.css";
@@ -67,7 +68,9 @@ export function RunPanel() {
       : `Stopped at ${failed.label.toLowerCase()}`
     : running
       ? `Building, ${fmtDur(total, true)}`
-      : `Built in ${fmtDur(total) || "0.0 s"}`;
+      : run.notSimulated
+        ? "Not simulated yet"
+        : `Built in ${fmtDur(total) || "0.0 s"}`;
   const state = failed ? "error" : running ? "running" : "done";
 
   if (isFolded)
@@ -191,7 +194,7 @@ function StepLine({ step, run, elapsed, onRetry }: { step: PipelineStep; run: Ru
             Try again
           </button>
           {step.id === "plan" && !run.overrideEdit && (
-            <button className="rp-btn" onClick={() => document.querySelector<HTMLTextAreaElement>("textarea")?.focus()}>
+            <button className="rp-btn" onClick={focusComposer}>
               Edit plan
             </button>
           )}
@@ -237,7 +240,7 @@ function StepLine({ step, run, elapsed, onRetry }: { step: PipelineStep; run: Ru
             )}
           </div>
         );
-      if (!r) return null;
+      if (!r) return run.notSimulated ? <p className="rp-line">Not simulated yet. No saved run for this plan.</p> : null;
       return (
         <>
           <p className="rp-line">{routeLine(r)}</p>

@@ -2,7 +2,7 @@
 import { useCallback } from "react";
 import { api } from "@/lib/api";
 import { gazetteer } from "@/lib/ai/mock";
-import { checkEditAgainstGazetteer, type ScenarioEdit, type ScenarioResult } from "@/lib/contract";
+import { checkEditAgainstGazetteer, type LngLat, type Network, type ScenarioEdit, type ScenarioResult } from "@/lib/contract";
 import { useStore, type PipelineStep, type RunRecord } from "@/lib/store";
 import { prefersReducedMotion } from "./useReducedMotion";
 
@@ -20,7 +20,10 @@ let runSeq = 0;
 
 /** Fit the camera to the proposed line, shifted so the line sits left of the results card on wide screens. */
 function cameraFor(result: ScenarioResult, photoreal: boolean) {
-  const pts = result.line.path.length ? result.line.path : result.agents.slice(0, 50).map((a) => a.home);
+  return cameraForPoints(result.line.path.length ? result.line.path : result.agents.slice(0, 50).map((a) => a.home), photoreal);
+}
+
+function cameraForPoints(pts: LngLat[], photoreal: boolean) {
   const lng = pts.map((p) => p[0]);
   const lat = pts.map((p) => p[1]);
   const span = Math.max(Math.max(...lng) - Math.min(...lng), Math.max(...lat) - Math.min(...lat), 0.005);
@@ -35,6 +38,20 @@ function cameraFor(result: ScenarioResult, photoreal: boolean) {
     bearing: BEARING,
     transitionDuration: 1800,
   };
+}
+
+/** Camera framing the edit itself (stops and affected roads), for plans with no simulation. */
+function cameraForEdit(edit: ScenarioEdit, network: Network | null, photoreal: boolean) {
+  const ids = new Set(edit.roadIds ?? []);
+  const line = !edit.stops.length && edit.baseLineId ? network?.rail.find((r) => r.id === edit.baseLineId)?.paths.flat() : undefined;
+  const pts: LngLat[] = [
+    ...edit.stops.map((s) => s.coord),
+    ...(network?.roads.filter((r) => ids.has(r.id)).flatMap((r) => r.path) ?? []),
+    ...(line ?? []),
+    ...(edit.chargeZone ?? []),
+  ];
+  if (!pts.length) return null;
+  return cameraForPoints(pts, photoreal);
 }
 
 /**
@@ -116,6 +133,7 @@ export function useBuildFlow() {
       routeMs: null,
       file: null,
       result: null,
+      notSimulated: false,
       error: null,
       cancelled: false,
     };
@@ -157,6 +175,17 @@ export function useBuildFlow() {
       const { result, timing } = await api.simulateTimed({ edit: plan.edit, claims: plan.claims });
       if (!live()) return;
       patch({ simMs: performance.now() - simStart, routeMs: timing.routeMs, file: timing.file, result });
+      if (!result) {
+        // No saved or live simulation for this edit. Show the plan itself (stops, roads) and stop here:
+        // never draw or score another plan's results.
+        finish("route", "warn");
+        const steps = st().runs.find((r) => r.id === id)?.steps.filter((p) => p.id !== "score" && p.id !== "draw") ?? [];
+        patch({ notSimulated: true, steps, endedAt: performance.now() });
+        st().set({ phase: "done", pipeline: steps, resultsOpen: true });
+        const cam = cameraForEdit(plan.edit, st().network, st().view === "photoreal");
+        if (cam) st().set({ camera: cam });
+        return;
+      }
       finish("route", result.source === "mock" || result.isMock ? "warn" : "done");
 
       // 5. Score stakes: computed by the simulation in the same result; recorded as its own step.

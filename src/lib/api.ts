@@ -9,6 +9,7 @@ import {
   type PersonaRequest,
   type PlanRequest,
   type ScenarioResult,
+  type ScenarioSource,
   type SimulateRequest,
 } from "@/lib/contract";
 import type { ZodType } from "zod";
@@ -42,7 +43,16 @@ export type SimulateTiming = {
  * POST /api/simulate. Stored results come back as a pointer (Vercel caps function responses at 4.5 MB):
  * fetch the static file, validate it, and stamp source / mockSections / isMock as the route used to.
  */
-async function simulate(req: SimulateRequest): Promise<{ result: ScenarioResult; timing: SimulateTiming }> {
+async function simulate(req: SimulateRequest): Promise<{ result: ScenarioResult; source: ScenarioSource; timing: SimulateTiming }>;
+async function simulate(
+  req: SimulateRequest,
+  opts: { skipMock: true },
+): Promise<{ result: ScenarioResult | null; source: ScenarioSource; timing: SimulateTiming }>;
+/**
+ * `skipMock`: when the server has no simulation for this edit it points at the placeholder scenario
+ * (always the streetcar). Return `result: null` instead of loading another plan's numbers.
+ */
+async function simulate(req: SimulateRequest, opts?: { skipMock: true }): Promise<{ result: ScenarioResult | null; source: ScenarioSource; timing: SimulateTiming }> {
   const t0 = performance.now();
   const res = await fetch("/api/simulate", post(req));
   const json = await res.json().catch(() => null);
@@ -51,6 +61,7 @@ async function simulate(req: SimulateRequest): Promise<{ result: ScenarioResult;
   if (json && typeof json === "object" && "scenarioUrl" in json) {
     const ptr = SimulatePointerSchema.safeParse(json);
     if (!ptr.success) throw new Error("/api/simulate: pointer does not match the contract");
+    if (opts?.skipMock && ptr.data.source === "mock") return { result: null, source: "mock" as const, timing: { routeMs, file: null } };
     const t1 = performance.now();
     const fileRes = await fetch(ptr.data.scenarioUrl);
     if (!fileRes.ok) throw new Error(`${ptr.data.scenarioUrl}: HTTP ${fileRes.status}`);
@@ -69,21 +80,23 @@ async function simulate(req: SimulateRequest): Promise<{ result: ScenarioResult;
       // Article claims are only meaningful when the plan came from an article (as the route did).
       claims: req.claims?.length ? (ptr.data.claims ?? parsed.data.claims) : [],
     };
-    return { result, timing: { routeMs, file: { url: ptr.data.scenarioUrl, ms: performance.now() - t1, bytes: text.length } } };
+    return { result, source, timing: { routeMs, file: { url: ptr.data.scenarioUrl, ms: performance.now() - t1, bytes: text.length } } };
   }
   const parsed = ScenarioResultSchema.safeParse(json);
   if (!parsed.success) {
     console.error("/api/simulate", parsed.error.issues.slice(0, 10));
     throw new Error("/api/simulate: response does not match the contract");
   }
-  return { result: parsed.data, timing: { routeMs, file: null } };
+  const source: ScenarioSource = parsed.data.source ?? (parsed.data.isMock ? "mock" : "live_sim");
+  if (opts?.skipMock && source === "mock") return { result: null, source, timing: { routeMs, file: null } };
+  return { result: parsed.data, source, timing: { routeMs, file: null } };
 }
 
 export const api = {
   plan: (req: PlanRequest) => call("/api/plan", PlanResponseSchema, post(req)),
   simulate: (req: SimulateRequest) => simulate(req).then((r) => r.result),
-  /** Same as simulate, plus where the time went (route call, static file fetch). */
-  simulateTimed: simulate,
+  /** Like simulate, plus where the time went; `result` is null when there is no simulation for the edit. */
+  simulateTimed: (req: SimulateRequest) => simulate(req, { skipMock: true }),
   persona: (req: PersonaRequest) => call("/api/persona", PersonaResponseSchema, post(req)),
   /** Static context geometry (roads, rail, Beltline, overlays). */
   network: (url = "/scenarios/network.json"): Promise<Network> => call(url, NetworkSchema),
