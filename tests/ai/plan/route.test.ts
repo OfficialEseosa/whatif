@@ -20,7 +20,9 @@ test("POST /api/plan produces distinct edits for grounded extensions and service
   });
   assert.equal(extension.isMock, true);
   assert.equal(extension.edit.type, "extend_line");
-  assert.deepEqual(extension.edit.stops.map((stop) => stop.gazetteerId), ["ponce_city_market"]);
+  // Filled in from the studied corridor (src/lib/ai/plan/corridors.ts) so it matches the saved sim run.
+  assert.equal(extension.edit.stops.at(-1)?.gazetteerId, "ponce_city_market");
+  assert.equal(extension.edit.stops.length, 6);
 
   const frequency = await postPlan({
     mode: "fix",
