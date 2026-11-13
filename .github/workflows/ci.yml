@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Frontend (typecheck, lint, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm run build
+
+  backend:
+    name: Backend (API routes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Validate committed scenarios against the contract
+        run: >
+          node --no-warnings sim/validate_contract.mjs
+          public/scenarios/beltline-streetcar.json
+          public/scenarios/baseline.sim.json
+          public/scenarios/beltline-streetcar.sim.json
+      - run: npm run build
+      - name: Smoke-test the API routes (mock data, no keys)
+        run: |
+          npm start > server.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null http://localhost:3000 && break
+            sleep 1
+          done
+          npm run check:api
+      - name: Server log
+        if: failure()
+        run: cat server.log
+
+  sim:
+    name: Simulation (Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sim
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: sim/requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Byte-compile
+        run: python -m compileall -q .
+      - name: Import every module
+        run: python -c "import assign, config, contract, costs, demand, equity, export, fetch_data, main, mode_choice, model, network, run, sanity, scenario, transit, verdict"
+      - name: Validate committed scenarios against the pydantic contract
+        run: |
+          python - <<'PY'
+          import json, sys
+          import config
+          from contract import ScenarioResult
+
+          failed = 0
+          for p in sorted(config.SCENARIO_OUT_DIR.glob("*.json")):
+              d = json.loads(p.read_text(encoding="utf-8"))
+              if "edit" not in d:
+                  continue
+              try:
+                  ScenarioResult.model_validate(d)
+                  print("OK  ", p.name)
+              except Exception as ex:
+                  failed += 1
+                  print("FAIL", p.name, str(ex)[:2000])
+          sys.exit(1 if failed else 0)
+          PY
